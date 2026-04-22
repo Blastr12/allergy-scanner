@@ -31,26 +31,30 @@ if password == "idaho2026":
 
             product = data.get("product", {})
             name = product.get("product_name", "Unknown Product").upper()
+            
+            # --- COLLECT ALL TEXT SOURCES ---
             ingredients = product.get("ingredients_text", "").lower()
             allergen_tags = ", ".join(product.get("allergens_hierarchy", [])).lower()
-            full_text = f"{ingredients} {allergen_tags}"
+            # NEW: Pulling in the 'traces' field for "May Contain" warnings
+            traces = str(product.get("traces", "")).lower()
+            
+            # Combine everything into one text block for scanning
+            full_text = f"{ingredients} {allergen_tags} {traces}"
 
             # --- ALLERGY SETTINGS ---
-            # Added Soy and Lecithin to the red flags
             red_flags = [
                 "milk", "butter", "whey", "casein", "lactose", "cream", 
                 "cheese", "ghee", "caseinate", "curd", "yogurt", "kefir",
                 "soy", "soya", "lecithin", "edamame", "tofu", "miso"
             ]
             
-            # These are only safe if NO other red flags are present
-            # Removed "soy milk" from this list since soy is now a danger
+            # Plant-based milks that are safe (excluding Soy)
             safe_plant_phrases = ["coconut milk", "almond milk", "oat milk", "cashew milk"]
 
             # 1. Identify all red flags found
             found = [f.upper() for f in red_flags if f in full_text]
 
-            # 2. Smart Filter for Milk
+            # 2. Smart Filter for Milk (Ensuring Almond/Oat/Coconut Milk stay SAFE)
             if "MILK" in found:
                 has_real_danger = False
                 
@@ -68,14 +72,14 @@ if password == "idaho2026":
                     if "milk" not in temp_text:
                         found.remove("MILK")
 
+            # 3. Final Check: If anything is in 'traces', force it to RED
             if found:
-                # Remove duplicates and list the dangers found
                 unique_found = list(set(found))
-                return f"❌ DANGER: {', '.join(unique_found)} in {name}", "error"
+                return f"❌ DANGER (Contains or May Contain): {', '.join(unique_found)} in {name}", "error"
             
-            # Safety warning for high-risk items
-            if any(x in name for x in ["RAMEN", "NOODLE", "CHOCOLATE", "SPRAY"]):
-                return f"⚠️ CHECK LABEL: {name} may have hidden soy or dairy.", "warning"
+            # Extra Caution for notoriously risky categories
+            if any(x in name for x in ["RAMEN", "NOODLE", "CHOCOLATE", "SPRAY", "BAKERY"]):
+                return f"⚠️ CHECK LABEL: {name} often has cross-contamination.", "warning"
                 
             return f"✅ SAFE: {name}", "success"
             
