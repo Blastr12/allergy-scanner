@@ -37,7 +37,6 @@ def delete_from_memory(barcode):
 password = st.sidebar.text_input("Family Password", type="password")
 
 if password == "idaho2026": 
-    # Create Tabs: Scanner and Database Management
     tab1, tab2 = st.tabs(["🔍 Live Scanner", "📋 Manage Saved Lists"])
 
     with tab1:
@@ -46,12 +45,14 @@ if password == "idaho2026":
 
         def check_allergy(barcode):
             barcode = barcode.strip()
+            # 1. Check Family List First
             if barcode in st.session_state.personal_db:
                 item = st.session_state.personal_db[barcode]
                 status_emoji = "✅" if item['status'] == "Safe" else "❌"
                 status_text = "TRUSTED" if item['status'] == "Safe" else "CONFIRMED DANGER"
                 return f"{status_emoji} {status_text}: {item['name']}", item['status'].lower(), f"Reason: {item['reason']}", None, None
             
+            # 2. Check Web Database
             url = f"https://world.openfoodfacts.org/api/v2/product/{barcode}.json"
             try:
                 response = requests.get(url, impersonate="chrome", timeout=5)
@@ -65,24 +66,5 @@ if password == "idaho2026":
                 img_url = product.get("image_front_url") or product.get("image_url")
                 full_text = f"{ingredients} {str(product.get('allergens_hierarchy', []))}"
                 
-                oil_percent = None
-                match = re.search(r'(\d+)\s*%', full_text)
-                if match: oil_percent = f"{match.group(1)}%"
-                
-                is_elecare = "elecare" in name.lower()
-                has_soy_oil = "soy oil" in full_text or "soybean oil" in full_text
-                
-                dangers = []
-                if any(m in full_text for m in ["milk", "dairy", "butter", "whey", "casein"]):
-                    if not any(p in full_text for p in ["coconut milk", "almond milk", "oat milk"]):
-                        dangers.append("MILK")
-                if ("soy" in full_text or "soya" in full_text) and not (is_elecare or has_soy_oil):
-                    dangers.append("SOY")
-
-                if dangers: return f"❌ DANGER: {', '.join(dangers)} in {name}", "error", full_text, oil_percent, img_url
-                if is_elecare or has_soy_oil: return f"✅ SAFE (Soy Oil): {name}", "success", full_text, oil_percent, img_url
-                return f"✅ SAFE: {name}", "success", full_text, None, img_url
-            except: return "⚠️ ERROR", "info", "", None, None
-
-        if st.session_state.frozen_barcode is None:
-            img
+                oil_perc = None
+                match =
