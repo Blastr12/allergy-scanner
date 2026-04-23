@@ -67,4 +67,82 @@ if password == "idaho2026":
                 full_text = f"{ingredients} {str(product.get('allergens_hierarchy', []))}"
                 
                 oil_perc = None
-                match =
+                match = re.search(r'(\d+)\s*%', full_text)
+                if match: oil_perc = f"{match.group(1)}%"
+                
+                is_elecare = "elecare" in name.lower()
+                has_soy_oil = "soy oil" in full_text or "soybean oil" in full_text
+                
+                dangers = []
+                if any(m in full_text for m in ["milk", "dairy", "butter", "whey", "casein", "lactylate"]):
+                    if not any(p in full_text for p in ["coconut milk", "almond milk", "oat milk"]):
+                        dangers.append("MILK")
+                if ("soy" in full_text or "soya" in full_text) and not (is_elecare or has_soy_oil):
+                    dangers.append("SOY")
+
+                if dangers: return f"❌ DANGER: {', '.join(dangers)} in {name}", "error", full_text, oil_perc, img_url
+                if is_elecare or has_soy_oil: return f"✅ SAFE (Soy Oil): {name}", "success", full_text, oil_perc, img_url
+                return f"✅ SAFE: {name}", "success", full_text, None, img_url
+            except: return "⚠️ ERROR", "info", "", None, None
+
+        # --- UI SCANNER ---
+        if st.session_state.frozen_barcode is None:
+            img_file = st.camera_input("Scanner")
+            if img_file:
+                img = Image.open(img_file)
+                decoded = decode(img)
+                if decoded:
+                    st.session_state.frozen_barcode = decoded[0].data.decode("utf-8")
+                    st.rerun()
+        else:
+            if st.button("🔄 SCAN NEXT ITEM"):
+                st.session_state.frozen_barcode = None
+                st.rerun()
+            
+            # --- THE FIX: We catch all 5 variables here ---
+            res, alert, raw, current_perc, official_img = check_allergy(st.session_state.frozen_barcode)
+            
+            if official_img: st.image(official_img, use_container_width=True)
+            
+            if alert == "error": st.error(res)
+            elif alert in ["success", "safe"]: st.success(res)
+            else:
+                st.warning(res)
+                st.markdown("### 📝 Manual Record Entry")
+                m_name = st.text_input("Product Name:")
+                m_reason = st.text_input("Reasoning:")
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("Mark SAFE ✅"):
+                        if m_name and m_reason:
+                            save_to_permanent_memory(st.session_state.frozen_barcode, m_name, m_reason, "Safe")
+                            st.rerun()
+                with c2:
+                    if st.button("Mark DANGER ❌"):
+                        if m_name and m_reason:
+                            save_to_permanent_memory(st.session_state.frozen_barcode, m_name, m_reason, "Danger")
+                            st.rerun()
+
+            # Using 'current_perc' consistently here
+            if current_perc: 
+                st.warning(f"📊 SOY OIL CONTENT: {current_perc}")
+            
+            with st.expander("Detailed Information"):
+                st.write(raw)
+
+    with tab2:
+        st.header("📋 Family List Management")
+        if not st.session_state.personal_db:
+            st.info("No items saved yet.")
+        else:
+            for bc, info in list(st.session_state.personal_db.items()):
+                color = "green" if info['status'] == "Safe" else "red"
+                with st.container(border=True):
+                    st.markdown(f"**{info['name']}**")
+                    st.markdown(f"Status: :{color}[{info['status']}]")
+                    st.caption(f"Reason: {info['reason']}")
+                    if st.button(f"Delete {info['name']}", key=f"del_{bc}"):
+                        delete_from_memory(bc)
+
+else:
+    st.info("Enter password.")
