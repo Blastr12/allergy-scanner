@@ -29,47 +29,54 @@ if password == "idaho2026":
             response = requests.get(url, impersonate="chrome", timeout=5)
             data = response.json()
             if data.get("status") == 0 or "product" not in data:
-                return "❓ NOT FOUND: Not in database.", "not_found", "", None
+                return "❓ NOT FOUND", "not_found", "", None
 
             product = data.get("product", {})
             name = product.get("product_name", "Unknown Product").upper()
-            ingredients = product.get("ingredients_text", "").lower()
-            allergen_tags = str(product.get("allergens_hierarchy", [])).lower()
+            ingredients = str(product.get("ingredients_text", "")).lower()
+            # We are pulling every possible tag that could cause a "RED" result
+            tags = str(product.get("allergens_hierarchy", [])).lower()
             traces = str(product.get("traces", "")).lower()
-            full_text = f"{ingredients} {allergen_tags} {traces}"
+            
+            full_text = f"{ingredients} {tags} {traces}"
 
             # --- SEARCH FOR PERCENTAGES ---
             oil_percent = None
-            percent_match = re.search(r'(soy|soybean)\s*oil.*?(\d+)\s*%', full_text)
+            percent_match = re.search(r'(\d+)\s*%', full_text)
             if percent_match:
-                oil_percent = f"{percent_match.group(2)}%"
+                oil_percent = f"{percent_match.group(1)}%"
 
-            # --- CLEAN THE TEXT FOR SCANNING ---
-            # We "remove" the safe phrases so they don't trigger the red flags
-            clean_text = full_text
-            safe_items = ["soy oil", "soybean oil", "coconut milk", "almond milk", "oat milk", "cashew milk"]
-            for item in safe_items:
-                clean_text = clean_text.replace(item, "PROTECTED_SAFE_ITEM")
-
+            # --- THE "FORCE PASS" FOR SOY OIL ---
+            # If the item is EleCare OR it contains Soy Oil, we treat "Soy" as safe
+            is_elecare = "elecare" in name.lower()
+            has_soy_oil = "soy oil" in full_text or "soybean oil" in full_text
+            
             # --- RED FLAGS ---
-            red_flags = [
-                "milk", "butter", "whey", "casein", "lactose", "cream", 
-                "cheese", "ghee", "caseinate", "curd", "yogurt", "kefir", "dairy",
-                "lactylate", "stearoyl", "soy", "soya", "lecithin", "edamame", "tofu"
-            ]
+            # We check for these specifically
+            dangers_found = []
             
-            found_danger = [f.upper() for f in red_flags if f in clean_text]
+            # Check for Milk
+            if any(m in full_text for m in ["milk", "dairy", "butter", "whey", "casein", "lactylate", "stearoyl"]):
+                # Only allow milk if it's in a safe plant phrase
+                safe_plants = ["coconut milk", "almond milk", "oat milk", "cashew milk"]
+                if not any(p in full_text for p in safe_plants):
+                    dangers_found.append("MILK/DAIRY")
 
-            # 3. FINAL LOGIC CHECK
-            if found_danger:
-                return f"❌ DANGER: {', '.join(list(set(found_danger)))} in {name}", "error", full_text, None
+            # Check for Soy
+            # If it's NOT EleCare and NOT Soy Oil, then 'Soy' is a danger
+            if "soy" in full_text or "soya" in full_text or "lecithin" in full_text:
+                if not (is_elecare or has_soy_oil):
+                    dangers_found.append("SOY PROTEIN/LECITHIN")
+
+            # 3. FINAL DECISION
+            if dangers_found:
+                return f"❌ DANGER: {', '.join(dangers_found)} in {name}", "error", full_text, None
             
-            # If nothing dangerous is found in clean_text, but Soy Oil was in original
-            if any(item in full_text for item in safe_items):
-                return f"✅ SAFE: {name} (Safe Oil/Plant Base)", "success", full_text, oil_percent
+            if is_elecare or has_soy_oil:
+                return f"✅ SAFE (Soy Oil/EleCare): {name}", "success", full_text, oil_percent
             
             if not ingredients:
-                return f"⚠️ NO DATA: {name} found, but list is empty. Read the box!", "warning", full_text, None
+                return f"⚠️ NO DATA: {name} found, but check label!", "warning", full_text, None
                 
             return f"✅ SAFE: {name}", "success", full_text, None
             
@@ -91,33 +98,24 @@ if password == "idaho2026":
                 barcode_num = obj.data.decode("utf-8")
                 result, alert_type, raw_text, percent = check_allergy(barcode_num)
                 
-                # STATUS DISPLAY
                 if alert_type == "error": st.error(result)
                 elif alert_type == "success": st.success(result)
                 else: st.warning(result)
 
-                # THE PERCENTAGE BOX (Now purely informational)
                 if percent:
                     st.warning(f"📊 SOY OIL CONTENT: {percent}")
-                elif "soy oil" in str(raw_text).lower():
-                    st.warning("📊 SOY OIL DETECTED: (Check label for %)")
+                elif "soy oil" in str(raw_text).lower() or "soybean oil" in str(raw_text).lower():
+                    st.warning("📊 SOY OIL DETECTED")
 
-                # Manual Override (Always visible for warnings/not found)
                 if alert_type in ["warning", "not_found"]:
                     p_name = st.text_input("Label this item:", value="Manual Entry")
-                    c1, c2 = st.columns(2)
-                    if c1.button("Mark Safe ✅"):
+                    if st.button("Mark Safe ✅"):
                         st.session_state.personal_db[barcode_num] = {"status": "Safe", "name": p_name}
                         st.rerun()
-                    if c2.button("Mark Danger ❌"):
-                        st.session_state.personal_db[barcode_num] = {"status": "Danger", "name": p_name}
-                        st.rerun()
                 
-                if raw_text:
-                    with st.expander("View Ingredient Text"):
-                        st.write(raw_text)
+                with st.expander("Debug: Data Scanned"):
+                    st.write(raw_text)
                     
     if st.button("Clear Scanner"): st.rerun()
-
 else:
-    st.info("Enter password in sidebar.")
+    st.info("Enter password.")
