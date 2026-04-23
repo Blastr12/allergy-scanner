@@ -4,9 +4,13 @@ from pyzbar.pyzbar import decode
 from PIL import Image
 import re 
 
-st.set_page_config(page_title="Family Allergy Scout", page_icon="🛡️")
-st.title("🛡️ Son's Allergy Scanner")
+# --- APP SETUP ---
+st.set_page_config(page_title="Allergy Scout Pro", page_icon="🛡️")
+st.title("🛡️ Hands-Free Allergy Scout")
 
+# 1. Initialize "Scan State" to handle the freezing
+if 'last_barcode' not in st.session_state:
+    st.session_state.last_barcode = None
 if 'personal_db' not in st.session_state:
     st.session_state.personal_db = {}
 
@@ -14,6 +18,7 @@ password = st.sidebar.text_input("Family Password", type="password")
 
 if password == "idaho2026": 
     
+    # [Internal check_allergy function remains the same as our previous 'Super Override' version]
     def check_allergy(barcode):
         barcode = barcode.strip()
         if barcode in st.session_state.personal_db:
@@ -34,75 +39,63 @@ if password == "idaho2026":
             traces = str(product.get("traces", "")).lower()
             full_text = f"{ingredients} {tags} {traces}"
 
-            # Percentage Check
             oil_percent = None
             percent_match = re.search(r'(\d+)\s*%', full_text)
-            if percent_match:
-                oil_percent = f"{percent_match.group(1)}%"
+            if percent_match: oil_percent = f"{percent_match.group(1)}%"
 
             is_elecare = "elecare" in name.lower()
             has_soy_oil = "soy oil" in full_text or "soybean oil" in full_text
             
-            dangers_found = []
-            
-            # --- STRICT DAIRY CHECK ---
-            if any(m in full_text for m in ["milk", "dairy", "butter", "whey", "casein", "lactylate", "stearoyl"]):
-                safe_plants = ["coconut milk", "almond milk", "oat milk", "cashew milk"]
-                if not any(p in full_text for p in safe_plants):
-                    dangers_found.append("MILK/DAIRY")
+            dangers = []
+            if any(m in full_text for m in ["milk", "dairy", "butter", "whey", "casein"]):
+                if not any(p in full_text for p in ["coconut milk", "almond milk", "oat milk"]):
+                    dangers.append("MILK")
+            if ("soy" in full_text or "soya" in full_text) and not (is_elecare or has_soy_oil):
+                dangers.append("SOY")
 
-            # --- STRICT SOY CHECK ---
-            if "soy" in full_text or "soya" in full_text or "lecithin" in full_text:
-                # If it has soy but NOT the oil/elecare exception, it's a danger
-                if not (is_elecare or has_soy_oil):
-                    dangers_found.append("SOY PROTEIN/LECITHIN")
+            if dangers: return f"❌ DANGER: {', '.join(dangers)} in {name}", "error", full_text, None
+            if is_elecare or has_soy_oil: return f"✅ SAFE (Soy Oil): {name}", "success", full_text, oil_percent
+            if not ingredients: return f"⚠️ NO DATA: {name}", "warning", full_text, None
+            return f"✅ SAFE: {name}", "success", full_text, None
+        except: return "⚠️ CONNECTION ERROR", "info", "", None
 
-            if dangers_found:
-                return f"❌ DANGER: {', '.join(dangers_found)} in {name}", "error", full_text, None
-            
-            if is_elecare or has_soy_oil:
-                return f"✅ SAFE (EXCEPTION): {name} (Confirmed Soy Oil Only)", "success", full_text, oil_percent
-            
-            if not ingredients:
-                return f"⚠️ NO DATA: {name} found, but check label!", "warning", full_text, None
-                
-            return f"✅ SAFE: {name} (No Allergens Found)", "success", full_text, None
-            
-        except Exception:
-            return "⚠️ CONNECTION ERROR", "info", "", None
+    # --- THE LIVE SCANNER UI ---
+    
+    # If we HAVEN'T found a barcode yet, show the camera
+    if st.session_state.last_barcode is None:
+        st.subheader("Point camera at barcode...")
+        img_file = st.camera_input("Scanner Active", label_visibility="collapsed")
+        
+        if img_file:
+            img = Image.open(img_file)
+            decoded = decode(img)
+            if decoded:
+                # BINGO! We found one. Save it to session state to "Freeze" the view.
+                st.session_state.last_barcode = decoded[0].data.decode("utf-8")
+                st.rerun() 
 
-    st.subheader("Scan a Product")
-    img_file = st.camera_input("Scan Barcode")
+    # If we HAVE a barcode, hide the camera and show the results (The "Freeze")
+    else:
+        barcode = st.session_state.last_barcode
+        result, alert_type, raw_text, percent = check_allergy(barcode)
+        
+        st.button("🔄 SCAN NEXT ITEM", on_click=lambda: st.session_state.update({"last_barcode": None}))
+        
+        if alert_type == "error": st.error(result)
+        elif alert_type == "success": st.success(result)
+        else: st.warning(result)
 
-    if img_file:
-        img = Image.open(img_file)
-        decoded_objects = decode(img)
+        if percent: st.warning(f"📊 SOY OIL: {percent}")
+        
+        if alert_type in ["warning", "not_found"]:
+            p_name = st.text_input("Name this item:", value="Manual Entry")
+            if st.button("Mark Safe ✅"):
+                st.session_state.personal_db[barcode] = {"status": "Safe", "name": p_name}
+                st.session_state.last_barcode = None # Unfreeze after saving
+                st.rerun()
 
-        if not decoded_objects:
-            st.warning("No barcode detected.")
-        else:
-            for obj in decoded_objects:
-                barcode_num = obj.data.decode("utf-8")
-                result, alert_type, raw_text, percent = check_allergy(barcode_num)
-                
-                if alert_type == "error": st.error(result)
-                elif alert_type == "success": st.success(result)
-                else: st.warning(result)
+        with st.expander("Show Detailed Ingredients"):
+            st.write(raw_text)
 
-                if percent:
-                    st.warning(f"📊 SOY OIL CONTENT: {percent}")
-                elif "soy oil" in str(raw_text).lower() or "soybean oil" in str(raw_text).lower():
-                    st.warning("📊 SOY OIL DETECTED")
-
-                if alert_type in ["warning", "not_found"]:
-                    p_name = st.text_input("Label this item:", value="Manual Entry")
-                    if st.button("Mark Safe ✅"):
-                        st.session_state.personal_db[barcode_num] = {"status": "Safe", "name": p_name}
-                        st.rerun()
-                
-                with st.expander("Debug Data"):
-                    st.write(raw_text)
-                    
-    if st.button("Clear Scanner"): st.rerun()
 else:
     st.info("Enter password.")
