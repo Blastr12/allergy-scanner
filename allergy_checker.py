@@ -38,21 +38,20 @@ if password == "idaho2026":
             traces = str(product.get("traces", "")).lower()
             full_text = f"{ingredients} {allergen_tags} {traces}"
 
-            # --- SEARCH FOR PERCENTAGES (Enhanced) ---
+            # --- SEARCH FOR PERCENTAGES ---
             oil_percent = None
-            # Matches "Soy Oil 7%", "Soy Oil (7%)", "Soy Oil at 7 percent", etc.
             percent_match = re.search(r'(soy|soybean)\s*oil.*?(\d+)\s*%', full_text)
             if percent_match:
                 oil_percent = f"{percent_match.group(2)}%"
 
-            # --- THE LOGIC: STRIP OUT SAFE ITEMS FIRST ---
-            # We create a "Clean Text" version that removes known safe phrases
+            # --- CLEAN THE TEXT FOR SCANNING ---
+            # We "remove" the safe phrases so they don't trigger the red flags
             clean_text = full_text
             safe_items = ["soy oil", "soybean oil", "coconut milk", "almond milk", "oat milk", "cashew milk"]
             for item in safe_items:
-                clean_text = clean_text.replace(item, "SAFE_PHRASE")
+                clean_text = clean_text.replace(item, "PROTECTED_SAFE_ITEM")
 
-            # --- RED FLAGS (Search only in the CLEAN text) ---
+            # --- RED FLAGS ---
             red_flags = [
                 "milk", "butter", "whey", "casein", "lactose", "cream", 
                 "cheese", "ghee", "caseinate", "curd", "yogurt", "kefir", "dairy",
@@ -61,16 +60,16 @@ if password == "idaho2026":
             
             found_danger = [f.upper() for f in red_flags if f in clean_text]
 
-            # 3. RESULTS
+            # 3. FINAL LOGIC CHECK
             if found_danger:
                 return f"❌ DANGER: {', '.join(list(set(found_danger)))} in {name}", "error", full_text, None
             
-            # If nothing dangerous is left, but we found Soy Oil/Plant Milk in the original text
+            # If nothing dangerous is found in clean_text, but Soy Oil was in original
             if any(item in full_text for item in safe_items):
-                return f"✅ SAFE (Check Oil %): {name}", "success", full_text, oil_percent
+                return f"✅ SAFE: {name} (Safe Oil/Plant Base)", "success", full_text, oil_percent
             
             if not ingredients:
-                return f"⚠️ NO DATA: {name} found, but list is empty.", "warning", full_text, None
+                return f"⚠️ NO DATA: {name} found, but list is empty. Read the box!", "warning", full_text, None
                 
             return f"✅ SAFE: {name}", "success", full_text, None
             
@@ -92,18 +91,18 @@ if password == "idaho2026":
                 barcode_num = obj.data.decode("utf-8")
                 result, alert_type, raw_text, percent = check_allergy(barcode_num)
                 
-                # 1. Status Display
+                # STATUS DISPLAY
                 if alert_type == "error": st.error(result)
                 elif alert_type == "success": st.success(result)
                 else: st.warning(result)
 
-                # 2. THE YELLOW BOX (Should appear for EleCare)
+                # THE PERCENTAGE BOX (Now purely informational)
                 if percent:
                     st.warning(f"📊 SOY OIL CONTENT: {percent}")
                 elif "soy oil" in str(raw_text).lower():
-                    st.warning("📊 SOY OIL DETECTED: (Percentage not found in text)")
+                    st.warning("📊 SOY OIL DETECTED: (Check label for %)")
 
-                # 3. Manual Override
+                # Manual Override (Always visible for warnings/not found)
                 if alert_type in ["warning", "not_found"]:
                     p_name = st.text_input("Label this item:", value="Manual Entry")
                     c1, c2 = st.columns(2)
