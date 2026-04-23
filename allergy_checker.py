@@ -45,14 +45,12 @@ if password == "idaho2026":
 
         def check_allergy(barcode):
             barcode = barcode.strip()
-            # 1. Check Family List First
             if barcode in st.session_state.personal_db:
                 item = st.session_state.personal_db[barcode]
                 status_emoji = "✅" if item['status'] == "Safe" else "❌"
                 status_text = "TRUSTED" if item['status'] == "Safe" else "CONFIRMED DANGER"
                 return f"{status_emoji} {status_text}: {item['name']}", item['status'].lower(), f"Reason: {item['reason']}", None, None
             
-            # 2. Check Web Database
             url = f"https://world.openfoodfacts.org/api/v2/product/{barcode}.json"
             try:
                 response = requests.get(url, impersonate="chrome", timeout=5)
@@ -85,7 +83,6 @@ if password == "idaho2026":
                 return f"✅ SAFE: {name}", "success", full_text, None, img_url
             except: return "⚠️ ERROR", "info", "", None, None
 
-        # --- UI SCANNER ---
         if st.session_state.frozen_barcode is None:
             img_file = st.camera_input("Scanner")
             if img_file:
@@ -99,9 +96,7 @@ if password == "idaho2026":
                 st.session_state.frozen_barcode = None
                 st.rerun()
             
-            # --- THE FIX: We catch all 5 variables here ---
             res, alert, raw, current_perc, official_img = check_allergy(st.session_state.frozen_barcode)
-            
             if official_img: st.image(official_img, use_container_width=True)
             
             if alert == "error": st.error(res)
@@ -123,10 +118,8 @@ if password == "idaho2026":
                             save_to_permanent_memory(st.session_state.frozen_barcode, m_name, m_reason, "Danger")
                             st.rerun()
 
-            # Using 'current_perc' consistently here
             if current_perc: 
                 st.warning(f"📊 SOY OIL CONTENT: {current_perc}")
-            
             with st.expander("Detailed Information"):
                 st.write(raw)
 
@@ -136,13 +129,43 @@ if password == "idaho2026":
             st.info("No items saved yet.")
         else:
             for bc, info in list(st.session_state.personal_db.items()):
+                # Unique key for tracking if this specific item is being edited
+                edit_key = f"is_editing_{bc}"
+                if edit_key not in st.session_state:
+                    st.session_state[edit_key] = False
+
                 color = "green" if info['status'] == "Safe" else "red"
                 with st.container(border=True):
-                    st.markdown(f"**{info['name']}**")
-                    st.markdown(f"Status: :{color}[{info['status']}]")
-                    st.caption(f"Reason: {info['reason']}")
-                    if st.button(f"Delete {info['name']}", key=f"del_{bc}"):
-                        delete_from_memory(bc)
+                    if st.session_state[edit_key]:
+                        # EDIT MODE
+                        new_name = st.text_input("Name", value=info['name'], key=f"name_{bc}")
+                        new_reason = st.text_input("Reason", value=info['reason'], key=f"reason_{bc}")
+                        new_status = st.selectbox("Status", ["Safe", "Danger"], index=0 if info['status'] == "Safe" else 1, key=f"status_{bc}")
+                        
+                        save_col, cancel_col = st.columns(2)
+                        with save_col:
+                            if st.button("Save Changes 💾", key=f"save_{bc}"):
+                                save_to_permanent_memory(bc, new_name, new_reason, new_status)
+                                st.session_state[edit_key] = False
+                                st.rerun()
+                        with cancel_col:
+                            if st.button("Cancel 🚫", key=f"cancel_{bc}"):
+                                st.session_state[edit_key] = False
+                                st.rerun()
+                    else:
+                        # DISPLAY MODE
+                        st.markdown(f"**{info['name']}** (Barcode: `{bc}`)")
+                        st.markdown(f"Status: :{color}[{info['status']}]")
+                        st.caption(f"Reason: {info['reason']}")
+                        
+                        edit_btn, del_btn = st.columns(2)
+                        with edit_btn:
+                            if st.button("Edit ✏️", key=f"edit_btn_{bc}"):
+                                st.session_state[edit_key] = True
+                                st.rerun()
+                        with del_btn:
+                            if st.button(f"Delete 🗑️", key=f"del_{bc}"):
+                                delete_from_memory(bc)
 
 else:
     st.info("Enter password.")
