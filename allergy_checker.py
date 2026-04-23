@@ -9,21 +9,18 @@ import pandas as pd
 st.set_page_config(page_title="Allergy Scout Pro", page_icon="🛡️")
 st.title("🛡️ Allergy Scout")
 
-DB_FILE = "family_safe_list.csv"
+DB_FILE = "family_blacklist_whitelist.csv"
 
-# Load permanent list with 'Reason' column support
+# Load the file with support for Name, Reason, and Status (Safe/Danger)
 if 'personal_db' not in st.session_state:
     if os.path.exists(DB_FILE):
         df = pd.read_csv(DB_FILE, dtype={'barcode': str})
-        # Handle cases where 'reason' might be missing from an older file version
-        if 'reason' not in df.columns:
-            df['reason'] = "No reason provided"
         st.session_state.personal_db = df.set_index('barcode').to_dict('index')
     else:
         st.session_state.personal_db = {}
 
-def save_to_permanent_memory(barcode, name, reason):
-    st.session_state.personal_db[barcode] = {"name": name, "reason": reason}
+def save_to_permanent_memory(barcode, name, reason, status):
+    st.session_state.personal_db[barcode] = {"name": name, "reason": reason, "status": status}
     df = pd.DataFrame.from_dict(st.session_state.personal_db, orient='index').reset_index()
     df.rename(columns={'index': 'barcode'}, inplace=True)
     df.to_csv(DB_FILE, index=False)
@@ -41,7 +38,9 @@ if password == "idaho2026":
         # Check Permanent Memory first
         if barcode in st.session_state.personal_db:
             item = st.session_state.personal_db[barcode]
-            return f"✅ TRUSTED: {item['name']}", "success", f"Reason: {item['reason']}", None, None
+            status_emoji = "✅" if item['status'] == "Safe" else "❌"
+            status_text = "TRUSTED" if item['status'] == "Safe" else "CONFIRMED DANGER"
+            return f"{status_emoji} {status_text}: {item['name']}", item['status'].lower(), f"Reason: {item['reason']}", None, None
         
         url = f"https://world.openfoodfacts.org/api/v2/product/{barcode}.json"
         try:
@@ -54,8 +53,8 @@ if password == "idaho2026":
             name = product.get("product_name", "Unknown Product").upper()
             ingredients = str(product.get("ingredients_text", "")).lower()
             img_url = product.get("image_front_url") or product.get("image_url")
-            
             full_text = f"{ingredients} {str(product.get('allergens_hierarchy', []))}"
+            
             oil_percent = None
             match = re.search(r'(\d+)\s*%', full_text)
             if match: oil_percent = f"{match.group(1)}%"
@@ -96,27 +95,32 @@ if password == "idaho2026":
             st.image(official_img, use_container_width=True)
         
         if alert == "error": st.error(res)
-        elif alert == "success": st.success(res)
+        elif alert == "success" or alert == "safe": st.success(res)
         else:
             st.warning(res)
-            st.markdown("### 📝 Manual Verification")
+            st.markdown("### 📝 Manual Record Entry")
             manual_name = st.text_input("Product Name:")
-            manual_reason = st.text_input("Why is this safe? (e.g. 'Spoke to Baker', 'Dairy-Free Facility')")
+            manual_reason = st.text_input("Reasoning (e.g. 'Has hidden dairy', 'Verified Dairy-Free'):")
             
-            if st.button("Add to Family Safe List Forever ✅"):
-                if manual_name and manual_reason:
-                    save_to_permanent_memory(st.session_state.frozen_barcode, manual_name, manual_reason)
-                    st.success(f"Verified {manual_name} saved!")
-                    st.rerun()
-                else:
-                    st.error("Both Name and Reason are required to trust this item.")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Mark SAFE Forever ✅"):
+                    if manual_name and manual_reason:
+                        save_to_permanent_memory(st.session_state.frozen_barcode, manual_name, manual_reason, "Safe")
+                        st.success("Added to Safe List!")
+                        st.rerun()
+                    else: st.error("Fill out all fields!")
+            with col2:
+                if st.button("Mark DANGER Forever ❌"):
+                    if manual_name and manual_reason:
+                        save_to_permanent_memory(st.session_state.frozen_barcode, manual_name, manual_reason, "Danger")
+                        st.error("Added to Danger List!")
+                        st.rerun()
+                    else: st.error("Fill out all fields!")
 
         if perc: st.warning(f"📊 SOY OIL CONTENT: {perc}")
-        with st.expander("Ingredients & Details"):
+        with st.expander("Detailed Information"):
             st.write(raw)
-
-    if st.sidebar.checkbox("Show Family Safe List"):
-        st.sidebar.json(st.session_state.personal_db)
 
 else:
     st.info("Enter password.")
