@@ -5,11 +5,13 @@ from PIL import Image
 import re 
 
 st.set_page_config(page_title="Allergy Scout Pro", page_icon="🛡️")
-st.title("🛡️ Allergy Scout: Freeze Mode")
+st.title("🛡️ Allergy Scout: Visual Mode")
 
-# Initialize session states
+# We added 'frozen_img' to the memory list
 if 'frozen_barcode' not in st.session_state:
     st.session_state.frozen_barcode = None
+if 'frozen_img' not in st.session_state:
+    st.session_state.frozen_img = None
 if 'personal_db' not in st.session_state:
     st.session_state.personal_db = {}
 
@@ -17,13 +19,12 @@ password = st.sidebar.text_input("Family Password", type="password")
 
 if password == "idaho2026": 
     
-    # [Check Allergy Function Logic - Same as your previous version]
+    # [check_allergy function remains the same as our previous 'Total Override' version]
     def check_allergy(barcode):
         barcode = barcode.strip()
         if barcode in st.session_state.personal_db:
             data = st.session_state.personal_db[barcode]
             return f"✅ {data['status'].upper()} (Memory): {data['name']}", data['status'].lower(), "", None
-
         url = f"https://world.openfoodfacts.org/api/v2/product/{barcode}.json"
         try:
             response = requests.get(url, impersonate="chrome", timeout=5)
@@ -34,57 +35,59 @@ if password == "idaho2026":
             name = product.get("product_name", "Unknown Product").upper()
             ingredients = str(product.get("ingredients_text", "")).lower()
             full_text = f"{ingredients} {str(product.get('allergens_hierarchy', []))}"
-            
-            # Soy Oil & EleCare Logic
             oil_percent = None
             match = re.search(r'(\d+)\s*%', full_text)
             if match: oil_percent = f"{match.group(1)}%"
-            
             is_elecare = "elecare" in name.lower()
             has_soy_oil = "soy oil" in full_text or "soybean oil" in full_text
-            
             dangers = []
             if any(m in full_text for m in ["milk", "dairy", "butter", "whey", "casein"]):
                 if not any(p in full_text for p in ["coconut milk", "almond milk", "oat milk"]):
                     dangers.append("MILK")
             if ("soy" in full_text or "soya" in full_text) and not (is_elecare or has_soy_oil):
                 dangers.append("SOY")
-
             if dangers: return f"❌ DANGER: {', '.join(dangers)} in {name}", "error", full_text, None
             if is_elecare or has_soy_oil: return f"✅ SAFE (Soy Oil): {name}", "success", full_text, oil_percent
             return f"✅ SAFE: {name}", "success", full_text, None
         except: return "⚠️ ERROR", "info", "", None
 
-    # --- THE FREEZE UI ---
+    # --- THE VISUAL UI ---
     
-    # If nothing is scanned yet, show the camera
     if st.session_state.frozen_barcode is None:
-        st.subheader("Snap a photo of the barcode")
+        st.subheader("Snap barcode photo")
         img_file = st.camera_input("Scanner")
         
         if img_file:
             img = Image.open(img_file)
             decoded = decode(img)
             if decoded:
-                # Store the barcode and REFRESH the page to hide the camera
+                # Store BOTH the code and the IMAGE
                 st.session_state.frozen_barcode = decoded[0].data.decode("utf-8")
+                st.session_state.frozen_img = img
                 st.rerun()
             else:
-                st.warning("No barcode seen in that photo. Try again!")
+                st.warning("No barcode detected. Try getting a bit closer!")
 
-    # If a barcode is "Frozen", hide camera and show results
     else:
-        st.button("🔍 SCAN NEW ITEM", on_click=lambda: st.session_state.update({"frozen_barcode": None}))
+        # 1. Reset Button at the Top
+        if st.button("🔄 SCAN NEW ITEM"):
+            st.session_state.frozen_barcode = None
+            st.session_state.frozen_img = None
+            st.rerun()
         
+        # 2. THE PHOTO (Shown above the results)
+        st.image(st.session_state.frozen_img, caption="Scanned Item Preview", use_container_width=True)
+        
+        # 3. THE ALLERGY RESULT
         res, alert, raw, perc = check_allergy(st.session_state.frozen_barcode)
         
         if alert == "error": st.error(res)
         elif alert == "success": st.success(res)
         else: st.warning(res)
         
-        if perc: st.warning(f"📊 SOY OIL: {perc}")
+        if perc: st.warning(f"📊 SOY OIL CONTENT: {perc}")
         
-        with st.expander("See Ingredients"):
+        with st.expander("Check Full Ingredient List"):
             st.write(raw)
 
 else:
