@@ -33,10 +33,11 @@ if password == "idaho2026":
             name = product.get("product_name", "Unknown Product").upper()
             ingredients = str(product.get("ingredients_text", "")).lower()
             
-            # --- GET PRODUCT IMAGE ---
-            img_url = product.get("image_url") # Official photo from the web
+            # --- IMPROVED IMAGE SEARCH ---
+            # We look for the main image first, then the front-of-box image
+            img_url = product.get("image_url") or product.get("image_front_url")
             
-            full_text = f"{ingredients} {str(product.get('allergens_hierarchy', []))}"
+            full_text = f"{ingredients} {str(product.get('allergens_hierarchy', []))} {str(product.get('traces', ''))}"
             
             oil_percent = None
             match = re.search(r'(\d+)\s*%', full_text)
@@ -46,11 +47,11 @@ if password == "idaho2026":
             has_soy_oil = "soy oil" in full_text or "soybean oil" in full_text
             
             dangers = []
-            if any(m in full_text for m in ["milk", "dairy", "butter", "whey", "casein"]):
-                if not any(p in full_text for p in ["coconut milk", "almond milk", "oat milk"]):
+            if any(m in full_text for m in ["milk", "dairy", "butter", "whey", "casein", "lactylate", "stearoyl"]):
+                if not any(p in full_text for p in ["coconut milk", "almond milk", "oat milk", "cashew milk"]):
                     dangers.append("MILK")
             
-            if ("soy" in full_text or "soya" in full_text) and not (is_elecare or has_soy_oil):
+            if ("soy" in full_text or "soya" in full_text or "lecithin" in full_text) and not (is_elecare or has_soy_oil):
                 dangers.append("SOY")
 
             if dangers: return f"❌ DANGER: {', '.join(dangers)} in {name}", "error", full_text, oil_percent, img_url
@@ -70,27 +71,3 @@ if password == "idaho2026":
             if decoded:
                 st.session_state.frozen_barcode = decoded[0].data.decode("utf-8")
                 st.rerun()
-
-    else:
-        if st.button("🔄 SCAN NEW ITEM"):
-            st.session_state.frozen_barcode = None
-            st.rerun()
-        
-        res, alert, raw, perc, official_img = check_allergy(st.session_state.frozen_barcode)
-        
-        # 1. SHOW OFFICIAL PRODUCT PHOTO
-        if official_img:
-            st.image(official_img, width=250)
-        
-        # 2. SHOW RESULTS
-        if alert == "error": st.error(res)
-        elif alert == "success": st.success(res)
-        else: st.warning(res)
-        
-        if perc: st.warning(f"📊 SOY OIL CONTENT: {perc}")
-        
-        with st.expander("Ingredients & Details"):
-            st.write(raw)
-
-else:
-    st.info("Enter password.")
