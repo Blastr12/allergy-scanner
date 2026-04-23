@@ -9,21 +9,23 @@ import pandas as pd
 st.set_page_config(page_title="Allergy Scout Pro", page_icon="🛡️")
 st.title("🛡️ Allergy Scout")
 
-# --- PERMANENT STORAGE SETUP ---
 DB_FILE = "family_safe_list.csv"
 
-# Load the permanent list from the file if it exists
+# Load permanent list with 'Reason' column support
 if 'personal_db' not in st.session_state:
     if os.path.exists(DB_FILE):
         df = pd.read_csv(DB_FILE, dtype={'barcode': str})
-        st.session_state.personal_db = df.set_index('barcode')['name'].to_dict()
+        # Handle cases where 'reason' might be missing from an older file version
+        if 'reason' not in df.columns:
+            df['reason'] = "No reason provided"
+        st.session_state.personal_db = df.set_index('barcode').to_dict('index')
     else:
         st.session_state.personal_db = {}
 
-def save_to_permanent_memory(barcode, name):
-    st.session_state.personal_db[barcode] = name
-    # Save to CSV so it never disappears
-    df = pd.DataFrame(list(st.session_state.personal_db.items()), columns=['barcode', 'name'])
+def save_to_permanent_memory(barcode, name, reason):
+    st.session_state.personal_db[barcode] = {"name": name, "reason": reason}
+    df = pd.DataFrame.from_dict(st.session_state.personal_db, orient='index').reset_index()
+    df.rename(columns={'index': 'barcode'}, inplace=True)
     df.to_csv(DB_FILE, index=False)
 
 # --- APP LOGIC ---
@@ -36,9 +38,10 @@ if password == "idaho2026":
     
     def check_allergy(barcode):
         barcode = barcode.strip()
-        # Check the Permanent Memory first
+        # Check Permanent Memory first
         if barcode in st.session_state.personal_db:
-            return f"✅ TRUSTED (Family List): {st.session_state.personal_db[barcode]}", "success", "This item was manually verified by the family.", None, None
+            item = st.session_state.personal_db[barcode]
+            return f"✅ TRUSTED: {item['name']}", "success", f"Reason: {item['reason']}", None, None
         
         url = f"https://world.openfoodfacts.org/api/v2/product/{barcode}.json"
         try:
@@ -96,23 +99,24 @@ if password == "idaho2026":
         elif alert == "success": st.success(res)
         else:
             st.warning(res)
-            # --- THE "FOREVER" BUTTON ---
-            manual_name = st.text_input("Product Name (e.g. Local Bread):")
+            st.markdown("### 📝 Manual Verification")
+            manual_name = st.text_input("Product Name:")
+            manual_reason = st.text_input("Why is this safe? (e.g. 'Spoke to Baker', 'Dairy-Free Facility')")
+            
             if st.button("Add to Family Safe List Forever ✅"):
-                if manual_name:
-                    save_to_permanent_memory(st.session_state.frozen_barcode, manual_name)
-                    st.success(f"Saved {manual_name} to family records!")
+                if manual_name and manual_reason:
+                    save_to_permanent_memory(st.session_state.frozen_barcode, manual_name, manual_reason)
+                    st.success(f"Verified {manual_name} saved!")
                     st.rerun()
                 else:
-                    st.error("Please enter a name first.")
+                    st.error("Both Name and Reason are required to trust this item.")
 
         if perc: st.warning(f"📊 SOY OIL CONTENT: {perc}")
         with st.expander("Ingredients & Details"):
             st.write(raw)
 
-    # Optional: Show the full list at the bottom
     if st.sidebar.checkbox("Show Family Safe List"):
-        st.sidebar.write(st.session_state.personal_db)
+        st.sidebar.json(st.session_state.personal_db)
 
 else:
     st.info("Enter password.")
