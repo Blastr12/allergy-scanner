@@ -33,9 +33,14 @@ if password == "idaho2026":
             name = product.get("product_name", "Unknown Product").upper()
             ingredients = str(product.get("ingredients_text", "")).lower()
             
-            # --- IMPROVED IMAGE SEARCH ---
-            # We look for the main image first, then the front-of-box image
-            img_url = product.get("image_url") or product.get("image_front_url")
+            # --- AGGRESSIVE IMAGE SEARCH ---
+            # We check every possible corner of the database for a photo
+            img_url = (
+                product.get("image_front_url") or 
+                product.get("image_url") or 
+                product.get("selected_images", {}).get("front", {}).get("display", {}).get("en") or
+                product.get("image_small_url")
+            )
             
             full_text = f"{ingredients} {str(product.get('allergens_hierarchy', []))} {str(product.get('traces', ''))}"
             
@@ -57,7 +62,8 @@ if password == "idaho2026":
             if dangers: return f"❌ DANGER: {', '.join(dangers)} in {name}", "error", full_text, oil_percent, img_url
             if is_elecare or has_soy_oil: return f"✅ SAFE (Soy Oil): {name}", "success", full_text, oil_percent, img_url
             return f"✅ SAFE: {name}", "success", full_text, None, img_url
-        except: return "⚠️ ERROR", "info", "", None, None
+        except Exception as e:
+            return f"⚠️ ERROR: {str(e)}", "info", "", None, None
 
     # --- UI ---
     
@@ -69,5 +75,32 @@ if password == "idaho2026":
             img = Image.open(img_file)
             decoded = decode(img)
             if decoded:
+                # This line freezes the screen
                 st.session_state.frozen_barcode = decoded[0].data.decode("utf-8")
                 st.rerun()
+    else:
+        # Show this button first so we can always "unfreeze"
+        if st.button("🔄 SCAN NEXT ITEM"):
+            st.session_state.frozen_barcode = None
+            st.rerun()
+        
+        res, alert, raw, perc, official_img = check_allergy(st.session_state.frozen_barcode)
+        
+        # DISPLAY PHOTO (Safely)
+        if official_img:
+            try:
+                st.image(official_img, use_container_width=True)
+            except:
+                st.info("📷 Image found but couldn't load.")
+        
+        # DISPLAY RESULTS
+        if alert == "error": st.error(res)
+        elif alert == "success": st.success(res)
+        else: st.warning(res)
+        
+        if perc: st.warning(f"📊 SOY OIL CONTENT: {percent}")
+        
+        with st.expander("Ingredients & Details"):
+            st.write(raw)
+else:
+    st.info("Enter password.")
