@@ -29,27 +29,11 @@ if 'full_db' not in st.session_state:
 if 'scan_history' not in st.session_state:
     st.session_state.scan_history = []
 
-def add_to_history(name, status, barcode, user):
-    now = datetime.now().strftime("%I:%M %p")
-    if not st.session_state.scan_history or st.session_state.scan_history[0]['barcode'] != barcode:
-        st.session_state.scan_history.insert(0, {
-            "time": now, "name": name, "status": status, "barcode": barcode, "user": user
-        })
-
 def save_to_permanent_memory(barcode, name, reason, status, user):
-    # This saves it to the CSV so it's there "forever"
     st.session_state.full_db[barcode] = {"name": name, "reason": reason, "status": status, "verified_by": user}
     df = pd.DataFrame.from_dict(st.session_state.full_db, orient='index').reset_index()
     df.rename(columns={'index': 'barcode'}, inplace=True)
     df.to_csv(DB_FILE, index=False)
-
-def delete_from_memory(barcode):
-    if barcode in st.session_state.full_db:
-        del st.session_state.full_db[barcode]
-        df = pd.DataFrame.from_dict(st.session_state.full_db, orient='index').reset_index()
-        df.rename(columns={'index': 'barcode'}, inplace=True)
-        df.to_csv(DB_FILE, index=False)
-        st.rerun()
 
 # --- LOGIN ---
 st.sidebar.header("🔑 Family Access")
@@ -57,7 +41,6 @@ secret_key = st.sidebar.text_input("Enter Your Name", type="password")
 current_user = PASS_TO_USER.get(secret_key)
 
 if current_user:
-    st.sidebar.success(f"Logged in as: {current_user}")
     tab1, tab2, tab3 = st.tabs(["🔍 Live Scanner", "📋 Managed Saved Lists", "🕒 Trip History"])
 
     with tab1:
@@ -66,33 +49,32 @@ if current_user:
 
         def check_allergy(barcode, user):
             barcode = barcode.strip()
-            # 1. CHECK FAMILY LIST FIRST (This is the "Forever" check)
+            
+            # 1. PRIORITY: Check your saved list first
             if barcode in st.session_state.full_db:
                 item = st.session_state.full_db[barcode]
                 emoji = "✅" if item['status'] == "Safe" else "❌"
-                add_to_history(item['name'], item['status'], barcode, user)
-                # Show who made the decision and why
                 return f"{emoji} {item['status'].upper()}: {item['name']}", item['status'].lower(), f"Reason: {item['reason']} (Verified by: {item.get('verified_by', 'System')})", None
-            
-            # 2. WEB DATABASE CHECK
+
+            # 2. WEB FETCH
             url = f"https://world.openfoodfacts.org/api/v2/product/{barcode}.json"
             try:
                 response = requests.get(url, impersonate="chrome", timeout=5)
                 data = response.json()
-                if data.get("status") == 0: return "❓ NOT FOUND", "not_found", "", None
-                
                 product = data.get("product", {})
                 p_name = product.get("product_name", "Unknown Product").upper()
-                ingred = str(product.get("ingredients_text", "")).strip().lower()
                 img = product.get("image_front_url") or product.get("image_url")
-                allergens = str(product.get('allergens_hierarchy', []))
                 
-                # --- MISSING DATA PROTECTION ---
-                if not ingred or ingred in ["nan", "none", "[]"] or allergens == "[]":
-                    # Force a decision from the user
-                    return f"⚠️ NO DATA FOUND: {p_name}", "warning", "Database is empty. Check physical label and save your decision below.", img
+                # Extracting raw values for validation
+                raw_ingred = str(product.get("ingredients_text", "")).strip().lower()
+                raw_allergens = product.get('allergens_hierarchy', [])
+                
+                # --- THE STRICT DATA CATCH ---
+                # This stops the code if ingredients are missing or too short to be real
+                if len(raw_ingred) < 5 or not raw_allergens or raw_allergens == []:
+                    return f"⚠️ INCOMPLETE DATA: {p_name}", "warning", f"Missing info in database. (Ingredients found: '{raw_ingred}')", img
 
-                full_text = f"{ingred} {allergens}"
+                full_text = f"{raw_ingred} {str(raw_allergens)}"
                 dangers = []
                 if any(m in full_text for m in ["milk", "dairy", "butter", "whey", "casein", "lactylate"]):
                     if not any(p in full_text for p in ["coconut milk", "almond milk", "oat milk"]):
@@ -100,9 +82,6 @@ if current_user:
                 if ("soy" in full_text or "soya" in full_text) and not ("soy oil" in full_text or "soybean oil" in full_text or "elecare" in p_name.lower()):
                     dangers.append("SOY")
 
-                status = "Safe" if not dangers else "Danger"
-                add_to_history(p_name, status, barcode, user)
-                
                 if dangers: return f"❌ DANGER: {', '.join(dangers)} in {p_name}", "error", full_text, img
                 return f"✅ SAFE: {p_name}", "success", full_text, img
             except: return "⚠️ CONNECTION ERROR", "info", "", None
@@ -122,35 +101,28 @@ if current_user:
             
             res, alert, raw, official_img = check_allergy(st.session_state.frozen_barcode, current_user)
             if official_img: st.image(official_img, use_container_width=True)
-            st.info(f"🔢 Barcode: `{st.session_state.frozen_barcode}` | Logged by: **{current_user}**")
             
-            # --- DISPLAY RESULT ---
+            # Displaying based on strict status
             if alert == "error": st.error(res)
             elif alert == "success": st.success(res)
-            elif alert == "warning": st.warning(res) # This triggers for the [] empty data
-            else: st.warning(res)
+            else: st.warning(res) # Yellow box for Incomplete Data or Warnings
 
-            # --- MANUAL OVERRIDE / NEW ENTRY SECTION ---
-            # This appears for "Not Found" OR "Warning" (Empty Data)
             if alert in ["warning", "not_found", "info"]:
-                st.markdown("### 💾 Save Your Decision")
-                st.caption("Once saved, this will show up for everyone scanning this item in the future.")
-                m_name = st.text_input("Product Name:", value=res.split(':')[-1].strip() if ':' in res else "")
-                m_reason = st.text_input("Reasoning (e.g. 'Checked label, contains no milk'):")
+                st.markdown("### 💾 Make a Permanent Decision")
+                m_name = st.text_input("Name:", value=res.split(':')[-1].strip() if ':' in res else "")
+                m_reason = st.text_input("Why is it safe/danger?")
                 c1, c2 = st.columns(2)
                 with c1:
-                    if st.button("Save as SAFE ✅"):
+                    if st.button("Mark SAFE Forever ✅"):
                         if m_name and m_reason:
                             save_to_permanent_memory(st.session_state.frozen_barcode, m_name, m_reason, "Safe", current_user)
-                            add_to_history(m_name, "Safe", st.session_state.frozen_barcode, current_user)
                             st.rerun()
                 with c2:
-                    if st.button("Save as DANGER ❌"):
+                    if st.button("Mark DANGER Forever ❌"):
                         if m_name and m_reason:
                             save_to_permanent_memory(st.session_state.frozen_barcode, m_name, m_reason, "Danger", current_user)
-                            add_to_history(m_name, "Danger", st.session_state.frozen_barcode, current_user)
                             st.rerun()
             
-            with st.expander("Database Details"): st.write(raw)
+            with st.expander("Details"): st.write(raw)
 
-    # ... [Management and History tabs remain the same as before] ...
+# [Remaining tab logic...]
