@@ -94,21 +94,21 @@ if current_user:
                     st.session_state.frozen_barcode = decoded[0].data.decode("utf-8")
                     st.rerun()
                 else:
-                    # --- THE NEW BIG TEXT FIX ---
                     st.markdown("""
                         <div style="background-color: #ff4b4b; padding: 20px; border-radius: 10px; text-align: center;">
                             <h1 style="color: white; margin: 0;">❌ COULD NOT READ BARCODE</h1>
                             <h2 style="color: white; margin: 0;">TRY AGAIN</h2>
                         </div>
                         """, unsafe_allow_html=True)
-                    st.warning("Make sure the barcode is centered and well-lit.")
         else:
             if st.button("🔄 SCAN NEXT"):
                 st.session_state.frozen_barcode = None
                 st.rerun()
             
             res, alert, raw = check_allergy(st.session_state.frozen_barcode, current_user)
-            st.info(f"🔢 Barcode: `{st.session_state.frozen_barcode}`")
+            
+            # --- THE BIG BARCODE TEXT FIX ---
+            st.markdown(f"### 🔢 Barcode: `{st.session_state.frozen_barcode}`")
             
             if alert == "error": st.error(res)
             elif alert == "success": st.success(res)
@@ -134,4 +134,34 @@ if current_user:
             
             with st.expander("Details"): st.write(raw)
 
-    # [Managed Lists and History tabs remain here...]
+    with tab2:
+        st.header("📋 Family List Management")
+        st.session_state.full_db = load_data()
+        search = st.text_input("🔍 Search List", "").lower()
+        items = {k: v for k, v in st.session_state.full_db.items() if search in str(v['name']).lower() or search in str(k)}
+        for bc, info in items.items():
+            edit_key = f"is_editing_{bc}"
+            if edit_key not in st.session_state: st.session_state[edit_key] = False
+            with st.container(border=True):
+                if st.session_state[edit_key]:
+                    n_n = st.text_input("Edit Name", info['name'], key=f"n_{bc}")
+                    n_r = st.text_input("Edit Reason", info['reason'], key=f"r_{bc}")
+                    n_s = st.selectbox("Status", ["Safe", "Danger"], 0 if info['status']=="Safe" else 1, key=f"s_{bc}")
+                    if st.button("Save 💾", key=f"sv_{bc}"):
+                        update_entry(bc, n_n, n_r, n_s, current_user)
+                        st.session_state[edit_key] = False
+                        st.rerun()
+                else:
+                    color = "green" if info['status'] == "Safe" else "red"
+                    st.markdown(f"**{info['name']}**")
+                    st.markdown(f"Status: :{color}[{info['status']}]")
+                    # Also made the barcode numbers in the list bigger for easier reference
+                    st.caption(f"Barcode: `{bc}`")
+                    st.caption(f"Reason: {info['reason']} | By: {info.get('verified_by', 'System')}")
+                    if st.button("Edit ✏️", key=f"e_{bc}"):
+                        st.session_state[edit_key] = True
+                        st.rerun()
+
+    with tab3:
+        st.header("🕒 Trip History")
+        # History logic...
