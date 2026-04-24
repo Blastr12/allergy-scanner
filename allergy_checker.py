@@ -7,15 +7,14 @@ import pandas as pd
 from datetime import datetime
 
 st.set_page_config(page_title="Allergy Scout Pro", page_icon="🛡️")
-st.title("🛡️ Allergy Scout")
 
 DB_FILE = "family_blacklist_whitelist.csv"
 
-# --- THE UPDATED ACCESS MAP ---
+# --- THE ACCESS MAP ---
 PASS_TO_USER = {
     "Joey": "Joey",
     "Brian": "Brian",
-    "Chey": "Cheyenne",  # Updated password to 'Chey'
+    "Chey": "Cheyenne", 
     "Andrina": "Andrina",
     "Brianna": "Brianna",
     "Micah": "Micah"
@@ -45,12 +44,19 @@ def update_entry(barcode, name, reason, status, user):
     save_to_file()
     st.toast(f"💾 {name} updated.")
 
-# --- LOGIN ---
-st.sidebar.header("🔑 Family Access")
-secret_key = st.sidebar.text_input("Enter Your Name", type="password")
-current_user = PASS_TO_USER.get(secret_key)
+# --- MAIN PAGE LOGIN ---
+st.title("🛡️ Allergy Scout")
+
+# Place the login at the top of the main page
+with st.container(border=True):
+    st.subheader("🔑 Family Access")
+    secret_key = st.text_input("Enter Your Name (Password)", type="password")
+    current_user = PASS_TO_USER.get(secret_key)
 
 if current_user:
+    st.success(f"Welcome back, {current_user}! Scanner Unlocked.")
+    st.divider() # Visual break between login and scanner
+
     tab1, tab2, tab3 = st.tabs(["🔍 Live Scanner", "📋 Managed Saved Lists", "🕒 Trip History"])
 
     with tab1:
@@ -165,4 +171,7 @@ if current_user:
 
     with tab3:
         st.header("🕒 Trip History")
-        # History logic remains here
+        # History logic stays here...
+
+else:
+    st.info("Enter your family password above to start scanning.")
