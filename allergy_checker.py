@@ -49,14 +49,15 @@ if password == "idaho2026":
                 item = st.session_state.personal_db[barcode]
                 status_emoji = "✅" if item['status'] == "Safe" else "❌"
                 status_text = "TRUSTED" if item['status'] == "Safe" else "CONFIRMED DANGER"
-                return f"{status_emoji} {status_text}: {item['name']}", item['status'].lower(), f"Reason: {item['reason']}", None, None
+                # Including the barcode in the return string
+                return f"{status_emoji} {status_text} [`{barcode}`]: {item['name']}", item['status'].lower(), f"Reason: {item['reason']}", None, None
             
             url = f"https://world.openfoodfacts.org/api/v2/product/{barcode}.json"
             try:
                 response = requests.get(url, impersonate="chrome", timeout=5)
                 data = response.json()
                 if data.get("status") == 0 or "product" not in data:
-                    return "❓ NOT FOUND", "not_found", "", None, None
+                    return f"❓ NOT FOUND [`{barcode}`]", "not_found", "", None, None
                 
                 product = data.get("product", {})
                 name = product.get("product_name", "Unknown Product").upper()
@@ -78,9 +79,11 @@ if password == "idaho2026":
                 if ("soy" in full_text or "soya" in full_text) and not (is_elecare or has_soy_oil):
                     dangers.append("SOY")
 
-                if dangers: return f"❌ DANGER: {', '.join(dangers)} in {name}", "error", full_text, oil_perc, img_url
-                if is_elecare or has_soy_oil: return f"✅ SAFE (Soy Oil): {name}", "success", full_text, oil_perc, img_url
-                return f"✅ SAFE: {name}", "success", full_text, None, img_url
+                # Adding barcode back to the final result headers
+                barcode_tag = f"[`{barcode}`]"
+                if dangers: return f"❌ DANGER {barcode_tag}: {', '.join(dangers)} in {name}", "error", full_text, oil_perc, img_url
+                if is_elecare or has_soy_oil: return f"✅ SAFE (Soy Oil) {barcode_tag}: {name}", "success", full_text, oil_perc, img_url
+                return f"✅ SAFE {barcode_tag}: {name}", "success", full_text, None, img_url
             except: return "⚠️ ERROR", "info", "", None, None
 
         if st.session_state.frozen_barcode is None:
@@ -129,7 +132,6 @@ if password == "idaho2026":
             st.info("No items saved yet.")
         else:
             for bc, info in list(st.session_state.personal_db.items()):
-                # Unique key for tracking if this specific item is being edited
                 edit_key = f"is_editing_{bc}"
                 if edit_key not in st.session_state:
                     st.session_state[edit_key] = False
@@ -137,7 +139,6 @@ if password == "idaho2026":
                 color = "green" if info['status'] == "Safe" else "red"
                 with st.container(border=True):
                     if st.session_state[edit_key]:
-                        # EDIT MODE
                         new_name = st.text_input("Name", value=info['name'], key=f"name_{bc}")
                         new_reason = st.text_input("Reason", value=info['reason'], key=f"reason_{bc}")
                         new_status = st.selectbox("Status", ["Safe", "Danger"], index=0 if info['status'] == "Safe" else 1, key=f"status_{bc}")
@@ -153,7 +154,6 @@ if password == "idaho2026":
                                 st.session_state[edit_key] = False
                                 st.rerun()
                     else:
-                        # DISPLAY MODE
                         st.markdown(f"**{info['name']}** (Barcode: `{bc}`)")
                         st.markdown(f"Status: :{color}[{info['status']}]")
                         st.caption(f"Reason: {info['reason']}")
