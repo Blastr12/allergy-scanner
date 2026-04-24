@@ -51,7 +51,6 @@ def update_entry(barcode, name, reason, status, user):
 st.title("🛡️ Allergy Scout")
 
 if not st.session_state.authenticated:
-    # --- LOGIN VIEW ---
     with st.container(border=True):
         st.subheader("🔑 Family Access")
         secret_key = st.text_input("Enter Your Name (Password)", type="password")
@@ -62,9 +61,8 @@ if not st.session_state.authenticated:
                 st.session_state.current_user = user
                 st.rerun()
             else:
-                st.error("Invalid password. Please try again.")
+                st.error("Invalid password.")
 else:
-    # --- LOGGED IN VIEW ---
     top_col1, top_col2 = st.columns([0.8, 0.2])
     with top_col1:
         st.success(f"Logged in as: **{st.session_state.current_user}**")
@@ -75,33 +73,37 @@ else:
             st.rerun()
 
     st.divider()
-
     tab1, tab2, tab3 = st.tabs(["🔍 Live Scanner", "📋 Managed Saved Lists", "🕒 Trip History"])
 
     with tab1:
         if 'frozen_barcode' not in st.session_state:
             st.session_state.frozen_barcode = None
 
-        def check_allergy(barcode, user):
+        def check_allergy(barcode):
             barcode = str(barcode).strip()
-            # Check family list first
+            # 1. Check family list first
             if barcode in st.session_state.full_db:
                 item = st.session_state.full_db[barcode]
                 emoji = "✅" if item['status'] == "Safe" else "❌"
                 return f"{emoji} {item['status'].upper()}: {item['name']}", item['status'].lower(), f"Reason: {item['reason']} (By: {item.get('verified_by', 'System')})"
             
-            # Web check
+            # 2. Web check
             url = f"https://world.openfoodfacts.org/api/v2/product/{barcode}.json"
             try:
                 response = requests.get(url, impersonate="chrome", timeout=5)
                 data = response.json()
                 product = data.get("product", {})
                 p_name = product.get("product_name", "Unknown Product").upper()
+                
+                # Get raw data
                 raw_ingred = str(product.get("ingredients_text", "")).strip().lower()
                 raw_allergens = product.get('allergens_hierarchy', [])
-
-                if len(raw_ingred) < 5 or not raw_allergens or raw_allergens == []:
-                    return f"⚠️ INCOMPLETE DATA: {p_name}", "warning", "No details found. Check label and save decision below."
+                
+                # --- FIXED BUG LOGIC ---
+                # Only force manual if ingredients ARE EMPTY AND allergens ARE EMPTY
+                # (Modified to be less sensitive: length < 3 instead of 5)
+                if len(raw_ingred) < 3 and (not raw_allergens or raw_allergens == []):
+                    return f"⚠️ NO DATA FOUND: {p_name}", "warning", "Database is empty. Please check the label manually."
 
                 full_text = f"{raw_ingred} {str(raw_allergens)}"
                 dangers = []
@@ -114,7 +116,7 @@ else:
                 status = "Safe" if not dangers else "Danger"
                 if dangers: return f"❌ DANGER: {', '.join(dangers)} in {p_name}", "error", full_text
                 return f"✅ SAFE: {p_name}", "success", full_text
-            except: return "⚠️ ERROR", "info", ""
+            except: return "⚠️ CONNECTION ERROR", "info", ""
 
         if st.session_state.frozen_barcode is None:
             img_file = st.camera_input("Scanner")
@@ -125,24 +127,20 @@ else:
                     st.session_state.frozen_barcode = decoded[0].data.decode("utf-8")
                     st.rerun()
                 else:
-                    st.markdown("""
-                        <div style="background-color: #ff4b4b; padding: 20px; border-radius: 10px; text-align: center;">
-                            <h1 style="color: white; margin: 0;">❌ COULD NOT READ BARCODE</h1>
-                            <h2 style="color: white; margin: 0;">TRY AGAIN</h2>
-                        </div>
-                        """, unsafe_allow_html=True)
+                    st.error("❌ COULD NOT READ BARCODE - TRY AGAIN")
         else:
             if st.button("🔄 SCAN NEXT"):
                 st.session_state.frozen_barcode = None
                 st.rerun()
             
-            res, alert, raw = check_allergy(st.session_state.frozen_barcode, st.session_state.current_user)
+            res, alert, raw = check_allergy(st.session_state.frozen_barcode)
             st.markdown(f"### 🔢 Barcode: `{st.session_state.frozen_barcode}`")
             
             if alert == "error": st.error(res)
             elif alert == "success": st.success(res)
             else: st.warning(res)
 
+            # Manual Save Logic - Only shows when the database truly has nothing
             if alert in ["warning", "not_found", "info"]:
                 st.markdown("### 💾 Save Your Decision")
                 m_name = st.text_input("Product Name:", value=res.split(':')[-1].strip() if ':' in res else "")
@@ -173,23 +171,21 @@ else:
             if edit_key not in st.session_state: st.session_state[edit_key] = False
             with st.container(border=True):
                 if st.session_state[edit_key]:
-                    n_n = st.text_input("Edit Name", info['name'], key=f"n_{bc}")
-                    n_r = st.text_input("Edit Reason", info['reason'], key=f"r_{bc}")
+                    n_n = st.text_input("Name", info['name'], key=f"n_{bc}")
+                    n_r = st.text_input("Reason", info['reason'], key=f"r_{bc}")
                     n_s = st.selectbox("Status", ["Safe", "Danger"], 0 if info['status']=="Safe" else 1, key=f"s_{bc}")
-                    if st.button("Save Changes 💾", key=f"sv_{bc}"):
+                    if st.button("Save 💾", key=f"sv_{bc}"):
                         update_entry(bc, n_n, n_r, n_s, st.session_state.current_user)
                         st.session_state[edit_key] = False
                         st.rerun()
                 else:
                     color = "green" if info['status'] == "Safe" else "red"
-                    st.markdown(f"**{info['name']}**")
-                    st.markdown(f"Status: :{color}[{info['status']}]")
-                    st.caption(f"Barcode: `{bc}`")
-                    st.caption(f"Reason: {info['reason']} | By: {info.get('verified_by', 'System')}")
+                    st.markdown(f"**{info['name']}** (:{color}[{info['status']}])")
+                    st.caption(f"Barcode: `{bc}` | By: {info.get('verified_by', 'System')}")
                     if st.button("Edit ✏️", key=f"e_{bc}"):
                         st.session_state[edit_key] = True
                         st.rerun()
 
     with tab3:
         st.header("🕒 Trip History")
-        # History code...
+        # Same history logic as before
