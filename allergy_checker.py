@@ -13,14 +13,11 @@ st.title("🛡️ Allergy Scout")
 DB_FILE = "family_blacklist_whitelist.csv"
 
 # --- DATABASE ENGINE ---
-if 'personal_db' not in st.session_state:
+if 'full_db' not in st.session_state:
     if os.path.exists(DB_FILE):
         df = pd.read_csv(DB_FILE, dtype={'barcode': str})
-        st.session_state.personal_db = df.set_index('barcode')['name'].to_dict() # Simplified for lookup
-        # Reloading full dict for management
         st.session_state.full_db = df.set_index('barcode').to_dict('index')
     else:
-        st.session_state.personal_db = {}
         st.session_state.full_db = {}
 
 # --- TRIP HISTORY ENGINE ---
@@ -29,25 +26,24 @@ if 'scan_history' not in st.session_state:
 
 def add_to_history(name, status, barcode):
     now = datetime.now().strftime("%I:%M %p")
-    st.session_state.scan_history.insert(0, {
-        "time": now,
-        "name": name,
-        "status": status,
-        "barcode": barcode
-    })
+    # Only add if it's not the exact same as the last scan (prevents double logs)
+    if not st.session_state.scan_history or st.session_state.scan_history[0]['barcode'] != barcode:
+        st.session_state.scan_history.insert(0, {
+            "time": now,
+            "name": name,
+            "status": status,
+            "barcode": barcode
+        })
 
 def save_to_permanent_memory(barcode, name, reason, status):
     st.session_state.full_db[barcode] = {"name": name, "reason": reason, "status": status}
     df = pd.DataFrame.from_dict(st.session_state.full_db, orient='index').reset_index()
     df.rename(columns={'index': 'barcode'}, inplace=True)
     df.to_csv(DB_FILE, index=False)
-    # Update simple lookup
-    st.session_state.personal_db[barcode] = name
 
 def delete_from_memory(barcode):
     if barcode in st.session_state.full_db:
         del st.session_state.full_db[barcode]
-        del st.session_state.personal_db[barcode]
         df = pd.DataFrame.from_dict(st.session_state.full_db, orient='index').reset_index()
         df.rename(columns={'index': 'barcode'}, inplace=True)
         df.to_csv(DB_FILE, index=False)
@@ -68,10 +64,10 @@ if password == "idaho2026":
             # 1. Check Family List First
             if barcode in st.session_state.full_db:
                 item = st.session_state.full_db[barcode]
-                status_emoji = "✅" if item['status'] == "Safe" else "❌"
-                status_text = "TRUSTED" if item['status'] == "Safe" else "CONFIRMED DANGER"
+                emoji = "✅" if item['status'] == "Safe" else "❌"
+                text = "TRUSTED" if item['status'] == "Safe" else "CONFIRMED DANGER"
                 add_to_history(item['name'], item['status'], barcode)
-                return f"{status_emoji} {status_text}: {item['name']}", item['status'].lower(), f"Reason: {item['reason']}", None, None
+                return f"{emoji} {text}: {item['name']}", item['status'].lower(), f"Reason: {item['reason']}", None, None
             
             # 2. Check Web Database
             url = f"https://world.openfoodfacts.org/api/v2/product/{barcode}.json"
@@ -83,9 +79,9 @@ if password == "idaho2026":
                 
                 product = data.get("product", {})
                 name = product.get("product_name", "Unknown Product").upper()
-                ingredients = str(product.get("ingredients_text", "")).lower()
-                img_url = product.get("image_front_url") or product.get("image_url")
-                full_text = f"{ingredients} {str(product.get('allergens_hierarchy', []))}"
+                ingred = str(product.get("ingredients_text", "")).lower()
+                img = product.get("image_front_url") or product.get("image_url")
+                full_text = f"{ingred} {str(product.get('allergens_hierarchy', []))}"
                 
                 oil_perc = None
                 match = re.search(r'(\d+)\s*%', full_text)
@@ -101,19 +97,19 @@ if password == "idaho2026":
                 if ("soy" in full_text or "soya" in full_text) and not (is_elecare or has_soy_oil):
                     dangers.append("SOY")
 
-                final_status = "Safe" if not dangers else "Danger"
-                add_to_history(name, final_status, barcode)
+                current_status = "Safe" if not dangers else "Danger"
+                add_to_history(name, current_status, barcode)
 
-                if dangers: return f"❌ DANGER: {', '.join(dangers)} in {name}", "error", full_text, oil_perc, img_url
-                if is_elecare or has_soy_oil: return f"✅ SAFE (Soy Oil): {name}", "success", full_text, oil_perc, img_url
-                return f"✅ SAFE: {name}", "success", full_text, None, img_url
+                if dangers: return f"❌ DANGER: {', '.join(dangers)} in {name}", "error", full_text, oil_perc, img
+                if is_elecare or has_soy_oil: return f"✅ SAFE (Soy Oil): {name}", "success", full_text, oil_perc, img
+                return f"✅ SAFE: {name}", "success", full_text, None, img
             except: return "⚠️ ERROR", "info", "", None, None
 
         if st.session_state.frozen_barcode is None:
             img_file = st.camera_input("Scanner")
             if img_file:
-                img = Image.open(img_file)
-                decoded = decode(img)
+                img_obj = Image.open(img_file)
+                decoded = decode(img_obj)
                 if decoded:
                     st.session_state.frozen_barcode = decoded[0].data.decode("utf-8")
                     st.rerun()
@@ -122,9 +118,9 @@ if password == "idaho2026":
                 st.session_state.frozen_barcode = None
                 st.rerun()
             
-            res, alert, raw, current_perc, official_img = check_allergy(st.session_state.frozen_barcode)
+            res, alert, raw, perc, official_img = check_allergy(st.session_state.frozen_barcode)
             if official_img: st.image(official_img, use_container_width=True)
-            st.info(f"🔢 Scanned Barcode: `{st.session_state.frozen_barcode}`")
+            st.info(f"🔢 Barcode: `{st.session_state.frozen_barcode}`")
             
             if alert == "error": st.error(res)
             elif alert in ["success", "safe"]: st.success(res)
@@ -147,47 +143,39 @@ if password == "idaho2026":
                             add_to_history(m_name, "Danger", st.session_state.frozen_barcode)
                             st.rerun()
 
-            if current_perc: st.warning(f"📊 SOY OIL CONTENT: {current_perc}")
-            with st.expander("Detailed Information"): st.write(raw)
+            if perc: st.warning(f"📊 SOY OIL CONTENT: {perc}")
+            with st.expander("Details"): st.write(raw)
 
     with tab2:
         st.header("📋 Family List Management")
-        search_query = st.text_input("🔍 Search by Name or Barcode", "").lower()
-        filtered_items = {k: v for k, v in st.session_state.full_db.items() if search_query in v['name'].lower() or search_query in k}
-        for bc, info in filtered_items.items():
-            edit_key = f"is_editing_{bc}"
+        search = st.text_input("🔍 Search List", "").lower()
+        items = {k: v for k, v in st.session_state.full_db.items() if search in v['name'].lower() or search in k}
+        for bc, info in items.items():
+            edit_key = f"edit_{bc}"
             if edit_key not in st.session_state: st.session_state[edit_key] = False
             color = "green" if info['status'] == "Safe" else "red"
             with st.container(border=True):
                 if st.session_state[edit_key]:
-                    n_name = st.text_input("Name", value=info['name'], key=f"n_{bc}")
-                    n_reason = st.text_input("Reason", value=info['reason'], key=f"r_{bc}")
-                    n_status = st.selectbox("Status", ["Safe", "Danger"], index=0 if info['status'] == "Safe" else 1, key=f"s_{bc}")
-                    if st.button("Save Changes 💾", key=f"sv_{bc}"):
-                        save_to_permanent_memory(bc, n_name, n_reason, n_status)
-                        st.session_state[edit_key] = False
-                        st.rerun()
+                    n_n = st.text_input("Name", info['name'], key=f"nn_{bc}")
+                    n_r = st.text_input("Reason", info['reason'], key=f"nr_{bc}")
+                    n_s = st.selectbox("Status", ["Safe", "Danger"], 0 if info['status']=="Safe" else 1, key=f"ns_{bc}")
+                    if st.button("Save 💾", key=f"s_{bc}"):
+                        save_to_permanent_memory(bc, n_n, n_r, n_s); st.session_state[edit_key]=False; st.rerun()
                 else:
                     st.markdown(f"**{info['name']}**")
                     st.markdown(f"Status: :{color}[{info['status']}]")
-                    st.caption(f"Barcode: `{bc}` | Reason: {info['reason']}")
-                    if st.button("Edit ✏️", key=f"ed_{bc}"):
-                        st.session_state[edit_key] = True
-                        st.rerun()
-                    if st.button("Delete 🗑️", key=f"de_{bc}"): delete_from_memory(bc)
+                    st.caption(f"BC: `{bc}` | Reason: {info['reason']}")
+                    if st.button("Edit ✏️", key=f"e_{bc}"): st.session_state[edit_key]=True; st.rerun()
+                    if st.button("Delete 🗑️", key=f"d_{bc}"): delete_from_memory(bc)
 
     with tab3:
         st.header("🕒 Today's Scans")
-        if st.button("🗑️ Clear Trip History"):
+        if st.button("🗑️ Clear History"):
             st.session_state.scan_history = []
             st.rerun()
-        
-        if not st.session_state.scan_history:
-            st.info("No scans logged yet this trip.")
-        else:
-            for item in st.session_state.scan_history:
-                icon = "✅" if item['status'] == "Safe" else "❌"
-                st.write(f"**{item['time']}** | {icon} {item['name']} (`{item['barcode']}`)")
+        for item in st.session_state.scan_history:
+            icon = "✅" if item['status'] == "Safe" else "❌"
+            st.write(f"**{item['time']}** | {icon} {item['name']} (`{item['barcode']}`)")
 
 else:
     st.info("Enter password.")
