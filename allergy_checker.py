@@ -12,8 +12,8 @@ st.title("🛡️ Allergy Scout")
 
 DB_FILE = "family_blacklist_whitelist.csv"
 
-# --- THE SECRET KEY MAP ---
-# Using the names as the actual passwords
+# --- THE NEW ACCESS MAP ---
+# Only these names will work as passwords now.
 PASS_TO_USER = {
     "Joey": "Joey",
     "Brian": "Brian",
@@ -60,11 +60,10 @@ def delete_from_memory(barcode):
         df.to_csv(DB_FILE, index=False)
         st.rerun()
 
-# --- THE "NAME-ONLY" LOGIN ---
+# --- LOGIN ---
 st.sidebar.header("🔑 Family Access")
-# Note: This is case-sensitive (e.g., 'Joey' with a capital J)
-secret_key = st.sidebar.text_input("Enter Your Name", type="password")
-
+# The 'idaho2026' check is gone; it now looks for the name directly.
+secret_key = st.sidebar.text_input("Enter Your Name (Password)", type="password")
 current_user = PASS_TO_USER.get(secret_key)
 
 if current_user:
