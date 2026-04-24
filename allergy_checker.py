@@ -4,9 +4,8 @@ from pyzbar.pyzbar import decode
 from PIL import Image
 import os
 import pandas as pd
-from datetime import datetime
 
-st.set_page_config(page_title="Allergy Scout Pro", page_icon="🛡️")
+st.set_page_config(page_title="Allergy Scout Pro", page_icon="🛡️", layout="wide")
 
 DB_FILE = "family_blacklist_whitelist.csv"
 
@@ -34,6 +33,10 @@ def load_data():
 if 'full_db' not in st.session_state:
     st.session_state.full_db = load_data()
 
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
+    st.session_state.current_user = None
+
 def save_to_file():
     df = pd.DataFrame.from_dict(st.session_state.full_db, orient='index').reset_index()
     df.rename(columns={'index': 'barcode'}, inplace=True)
@@ -44,18 +47,34 @@ def update_entry(barcode, name, reason, status, user):
     save_to_file()
     st.toast(f"💾 {name} updated.")
 
-# --- MAIN PAGE LOGIN ---
+# --- UI LOGIC ---
 st.title("🛡️ Allergy Scout")
 
-# Place the login at the top of the main page
-with st.container(border=True):
-    st.subheader("🔑 Family Access")
-    secret_key = st.text_input("Enter Your Name (Password)", type="password")
-    current_user = PASS_TO_USER.get(secret_key)
+if not st.session_state.authenticated:
+    # --- LOGIN VIEW ---
+    with st.container(border=True):
+        st.subheader("🔑 Family Access")
+        secret_key = st.text_input("Enter Your Name (Password)", type="password")
+        if st.button("Login"):
+            user = PASS_TO_USER.get(secret_key)
+            if user:
+                st.session_state.authenticated = True
+                st.session_state.current_user = user
+                st.rerun()
+            else:
+                st.error("Invalid password. Please try again.")
+else:
+    # --- LOGGED IN VIEW ---
+    top_col1, top_col2 = st.columns([0.8, 0.2])
+    with top_col1:
+        st.success(f"Logged in as: **{st.session_state.current_user}**")
+    with top_col2:
+        if st.button("Log Out 🚪"):
+            st.session_state.authenticated = False
+            st.session_state.current_user = None
+            st.rerun()
 
-if current_user:
-    st.success(f"Welcome back, {current_user}! Scanner Unlocked.")
-    st.divider() # Visual break between login and scanner
+    st.divider()
 
     tab1, tab2, tab3 = st.tabs(["🔍 Live Scanner", "📋 Managed Saved Lists", "🕒 Trip History"])
 
@@ -65,11 +84,13 @@ if current_user:
 
         def check_allergy(barcode, user):
             barcode = str(barcode).strip()
+            # Check family list first
             if barcode in st.session_state.full_db:
                 item = st.session_state.full_db[barcode]
                 emoji = "✅" if item['status'] == "Safe" else "❌"
                 return f"{emoji} {item['status'].upper()}: {item['name']}", item['status'].lower(), f"Reason: {item['reason']} (By: {item.get('verified_by', 'System')})"
             
+            # Web check
             url = f"https://world.openfoodfacts.org/api/v2/product/{barcode}.json"
             try:
                 response = requests.get(url, impersonate="chrome", timeout=5)
@@ -115,7 +136,7 @@ if current_user:
                 st.session_state.frozen_barcode = None
                 st.rerun()
             
-            res, alert, raw = check_allergy(st.session_state.frozen_barcode, current_user)
+            res, alert, raw = check_allergy(st.session_state.frozen_barcode, st.session_state.current_user)
             st.markdown(f"### 🔢 Barcode: `{st.session_state.frozen_barcode}`")
             
             if alert == "error": st.error(res)
@@ -130,13 +151,13 @@ if current_user:
                 with c1:
                     if st.button("Mark SAFE ✅"):
                         if m_name and m_reason:
-                            update_entry(st.session_state.frozen_barcode, m_name, m_reason, "Safe", current_user)
+                            update_entry(st.session_state.frozen_barcode, m_name, m_reason, "Safe", st.session_state.current_user)
                             st.session_state.frozen_barcode = None
                             st.rerun()
                 with c2:
                     if st.button("Mark DANGER ❌"):
                         if m_name and m_reason:
-                            update_entry(st.session_state.frozen_barcode, m_name, m_reason, "Danger", current_user)
+                            update_entry(st.session_state.frozen_barcode, m_name, m_reason, "Danger", st.session_state.current_user)
                             st.session_state.frozen_barcode = None
                             st.rerun()
             
@@ -155,8 +176,8 @@ if current_user:
                     n_n = st.text_input("Edit Name", info['name'], key=f"n_{bc}")
                     n_r = st.text_input("Edit Reason", info['reason'], key=f"r_{bc}")
                     n_s = st.selectbox("Status", ["Safe", "Danger"], 0 if info['status']=="Safe" else 1, key=f"s_{bc}")
-                    if st.button("Save 💾", key=f"sv_{bc}"):
-                        update_entry(bc, n_n, n_r, n_s, current_user)
+                    if st.button("Save Changes 💾", key=f"sv_{bc}"):
+                        update_entry(bc, n_n, n_r, n_s, st.session_state.current_user)
                         st.session_state[edit_key] = False
                         st.rerun()
                 else:
@@ -171,7 +192,4 @@ if current_user:
 
     with tab3:
         st.header("🕒 Trip History")
-        # History logic stays here...
-
-else:
-    st.info("Enter your family password above to start scanning.")
+        # History code...
