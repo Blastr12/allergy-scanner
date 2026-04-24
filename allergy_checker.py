@@ -82,6 +82,7 @@ else:
     tab1, tab2, tab3 = st.tabs(["🔍 Live Scanner", "📋 Managed Saved Lists", "🕒 Trip History"])
 
     with tab1:
+        # [SCANNER LOGIC REMAINS THE SAME]
         if 'frozen_barcode' not in st.session_state:
             st.session_state.frozen_barcode = None
 
@@ -101,7 +102,6 @@ else:
                 raw_ingred = str(product.get("ingredients_text", "")).strip().lower()
                 raw_allergens = product.get('allergens_hierarchy', [])
                 
-                # Loose Catch: Only trigger manual if it's truly empty
                 if len(raw_ingred) < 3 and (not raw_allergens or raw_allergens == []):
                     return f"⚠️ NO DATA FOUND: {p_name}", "warning", "Database is empty."
 
@@ -113,7 +113,6 @@ else:
                 if ("soy" in full_text or "soya" in full_text) and not ("soy oil" in full_text or "soybean oil" in full_text or "elecare" in p_name.lower()):
                     dangers.append("SOY")
 
-                status = "Safe" if not dangers else "Danger"
                 if dangers: return f"❌ DANGER: {', '.join(dangers)} in {p_name}", "error", full_text
                 return f"✅ SAFE: {p_name}", "success", full_text
             except: return "⚠️ CONNECTION ERROR", "info", ""
@@ -127,7 +126,7 @@ else:
                     st.session_state.frozen_barcode = decoded[0].data.decode("utf-8")
                     st.rerun()
                 else:
-                    st.error("❌ COULD NOT READ BARCODE - TRY AGAIN")
+                    st.markdown("""<div style="background-color:#ff4b4b;padding:20px;border-radius:10px;text-align:center;"><h1 style="color:white;margin:0;">❌ COULD NOT READ BARCODE</h1><h2 style="color:white;margin:0;">TRY AGAIN</h2></div>""", unsafe_allow_html=True)
         else:
             if st.button("🔄 SCAN NEXT"):
                 st.session_state.frozen_barcode = None
@@ -166,16 +165,19 @@ else:
         search = st.text_input("🔍 Search List", "").lower()
         items = {k: v for k, v in st.session_state.full_db.items() if search in str(v['name']).lower() or search in str(k)}
         
+        if not items:
+            st.info("No items in your saved list yet.")
+
         for bc, info in items.items():
             edit_key = f"is_editing_{bc}"
-            delete_key = f"is_deleting_{bc}" # Added state for deletion confirmation
+            delete_key = f"is_deleting_{bc}"
             
             if edit_key not in st.session_state: st.session_state[edit_key] = False
             if delete_key not in st.session_state: st.session_state[delete_key] = False
             
             with st.container(border=True):
                 if st.session_state[edit_key]:
-                    # --- EDIT UI ---
+                    # EDIT MODE
                     n_n = st.text_input("Name", info['name'], key=f"n_{bc}")
                     n_r = st.text_input("Reason", info['reason'], key=f"r_{bc}")
                     n_s = st.selectbox("Status", ["Safe", "Danger"], 0 if info['status']=="Safe" else 1, key=f"s_{bc}")
@@ -185,23 +187,23 @@ else:
                         st.rerun()
                 
                 elif st.session_state[delete_key]:
-                    # --- PROTECTED DELETE UI ---
-                    st.warning(f"Are you sure you want to delete **{info['name']}**?")
+                    # CONFIRM DELETE MODE
+                    st.error(f"🗑️ Delete **{info['name']}**?")
                     confirm_text = st.text_input(f"Type 'DELETE' to confirm:", key=f"conf_{bc}")
-                    col1, col2 = st.columns(2)
-                    with col1:
+                    c1, c2 = st.columns(2)
+                    with c1:
                         if st.button("Confirm Delete 🗑️", key=f"real_del_{bc}"):
                             if confirm_text == "DELETE":
                                 delete_entry(bc)
                             else:
-                                st.error("You must type DELETE exactly.")
-                    with col2:
-                        if st.button("Cancel", key=f"cancel_del_{bc}"):
+                                st.warning("Typing error: Must be 'DELETE'")
+                    with c2:
+                        if st.button("Back", key=f"cancel_del_{bc}"):
                             st.session_state[delete_key] = False
                             st.rerun()
                 
                 else:
-                    # --- VIEW UI ---
+                    # NORMAL VIEW
                     color = "green" if info['status'] == "Safe" else "red"
                     st.markdown(f"**{info['name']}** (:{color}[{info['status']}])")
                     st.caption(f"Barcode: `{bc}` | By: {info.get('verified_by', 'System')}")
@@ -218,4 +220,4 @@ else:
 
     with tab3:
         st.header("🕒 Trip History")
-        # History logic...
+        # History logic here...
