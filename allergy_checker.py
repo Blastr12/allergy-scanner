@@ -45,19 +45,20 @@ if password == "idaho2026":
 
         def check_allergy(barcode):
             barcode = barcode.strip()
+            # 1. Check Family List First
             if barcode in st.session_state.personal_db:
                 item = st.session_state.personal_db[barcode]
                 status_emoji = "✅" if item['status'] == "Safe" else "❌"
                 status_text = "TRUSTED" if item['status'] == "Safe" else "CONFIRMED DANGER"
-                # Including the barcode in the return string
-                return f"{status_emoji} {status_text} [`{barcode}`]: {item['name']}", item['status'].lower(), f"Reason: {item['reason']}", None, None
+                return f"{status_emoji} {status_text}: {item['name']}", item['status'].lower(), f"Reason: {item['reason']}", None, None
             
+            # 2. Check Web Database
             url = f"https://world.openfoodfacts.org/api/v2/product/{barcode}.json"
             try:
                 response = requests.get(url, impersonate="chrome", timeout=5)
                 data = response.json()
                 if data.get("status") == 0 or "product" not in data:
-                    return f"❓ NOT FOUND [`{barcode}`]", "not_found", "", None, None
+                    return "❓ NOT FOUND", "not_found", "", None, None
                 
                 product = data.get("product", {})
                 name = product.get("product_name", "Unknown Product").upper()
@@ -79,13 +80,12 @@ if password == "idaho2026":
                 if ("soy" in full_text or "soya" in full_text) and not (is_elecare or has_soy_oil):
                     dangers.append("SOY")
 
-                # Adding barcode back to the final result headers
-                barcode_tag = f"[`{barcode}`]"
-                if dangers: return f"❌ DANGER {barcode_tag}: {', '.join(dangers)} in {name}", "error", full_text, oil_perc, img_url
-                if is_elecare or has_soy_oil: return f"✅ SAFE (Soy Oil) {barcode_tag}: {name}", "success", full_text, oil_perc, img_url
-                return f"✅ SAFE {barcode_tag}: {name}", "success", full_text, None, img_url
+                if dangers: return f"❌ DANGER: {', '.join(dangers)} in {name}", "error", full_text, oil_perc, img_url
+                if is_elecare or has_soy_oil: return f"✅ SAFE (Soy Oil): {name}", "success", full_text, oil_perc, img_url
+                return f"✅ SAFE: {name}", "success", full_text, None, img_url
             except: return "⚠️ ERROR", "info", "", None, None
 
+        # --- UI SCANNER ---
         if st.session_state.frozen_barcode is None:
             img_file = st.camera_input("Scanner")
             if img_file:
@@ -100,7 +100,11 @@ if password == "idaho2026":
                 st.rerun()
             
             res, alert, raw, current_perc, official_img = check_allergy(st.session_state.frozen_barcode)
+            
             if official_img: st.image(official_img, use_container_width=True)
+            
+            # --- NEW: DEDICATED BARCODE DISPLAY ---
+            st.info(f"🔢 Scanned Barcode: `{st.session_state.frozen_barcode}`")
             
             if alert == "error": st.error(res)
             elif alert in ["success", "safe"]: st.success(res)
@@ -123,6 +127,7 @@ if password == "idaho2026":
 
             if current_perc: 
                 st.warning(f"📊 SOY OIL CONTENT: {current_perc}")
+            
             with st.expander("Detailed Information"):
                 st.write(raw)
 
@@ -154,8 +159,9 @@ if password == "idaho2026":
                                 st.session_state[edit_key] = False
                                 st.rerun()
                     else:
-                        st.markdown(f"**{info['name']}** (Barcode: `{bc}`)")
+                        st.markdown(f"**{info['name']}**")
                         st.markdown(f"Status: :{color}[{info['status']}]")
+                        st.caption(f"Barcode: `{bc}`")
                         st.caption(f"Reason: {info['reason']}")
                         
                         edit_btn, del_btn = st.columns(2)
