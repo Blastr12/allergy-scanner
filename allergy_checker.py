@@ -11,10 +11,14 @@ st.title("🛡️ Allergy Scout")
 
 DB_FILE = "family_blacklist_whitelist.csv"
 
-# --- ACCESS MAP ---
+# --- THE UPDATED ACCESS MAP ---
 PASS_TO_USER = {
-    "Joey": "Joey", "Brian": "Brian", "Cheyenne": "Cheyenne",
-    "Andrina": "Andrina", "Brianna": "Brianna", "Micah": "Micah"
+    "Joey": "Joey",
+    "Brian": "Brian",
+    "Chey": "Cheyenne",  # Updated password to 'Chey'
+    "Andrina": "Andrina",
+    "Brianna": "Brianna",
+    "Micah": "Micah"
 }
 
 # --- DATABASE ENGINE ---
@@ -106,8 +110,6 @@ if current_user:
                 st.rerun()
             
             res, alert, raw = check_allergy(st.session_state.frozen_barcode, current_user)
-            
-            # --- THE BIG BARCODE TEXT FIX ---
             st.markdown(f"### 🔢 Barcode: `{st.session_state.frozen_barcode}`")
             
             if alert == "error": st.error(res)
@@ -155,7 +157,6 @@ if current_user:
                     color = "green" if info['status'] == "Safe" else "red"
                     st.markdown(f"**{info['name']}**")
                     st.markdown(f"Status: :{color}[{info['status']}]")
-                    # Also made the barcode numbers in the list bigger for easier reference
                     st.caption(f"Barcode: `{bc}`")
                     st.caption(f"Reason: {info['reason']} | By: {info.get('verified_by', 'System')}")
                     if st.button("Edit ✏️", key=f"e_{bc}"):
@@ -164,4 +165,4 @@ if current_user:
 
     with tab3:
         st.header("🕒 Trip History")
-        # History logic...
+        # History logic remains here
