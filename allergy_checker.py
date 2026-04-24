@@ -47,6 +47,12 @@ def update_entry(barcode, name, reason, status, user):
     save_to_file()
     st.toast(f"💾 {name} updated.")
 
+def delete_entry(barcode):
+    if barcode in st.session_state.full_db:
+        del st.session_state.full_db[barcode]
+        save_to_file()
+        st.rerun()
+
 # --- UI LOGIC ---
 st.title("🛡️ Allergy Scout")
 
@@ -81,29 +87,23 @@ else:
 
         def check_allergy(barcode):
             barcode = str(barcode).strip()
-            # 1. Check family list first
             if barcode in st.session_state.full_db:
                 item = st.session_state.full_db[barcode]
                 emoji = "✅" if item['status'] == "Safe" else "❌"
                 return f"{emoji} {item['status'].upper()}: {item['name']}", item['status'].lower(), f"Reason: {item['reason']} (By: {item.get('verified_by', 'System')})"
             
-            # 2. Web check
             url = f"https://world.openfoodfacts.org/api/v2/product/{barcode}.json"
             try:
                 response = requests.get(url, impersonate="chrome", timeout=5)
                 data = response.json()
                 product = data.get("product", {})
                 p_name = product.get("product_name", "Unknown Product").upper()
-                
-                # Get raw data
                 raw_ingred = str(product.get("ingredients_text", "")).strip().lower()
                 raw_allergens = product.get('allergens_hierarchy', [])
                 
-                # --- FIXED BUG LOGIC ---
-                # Only force manual if ingredients ARE EMPTY AND allergens ARE EMPTY
-                # (Modified to be less sensitive: length < 3 instead of 5)
+                # Loose Catch: Only trigger manual if it's truly empty
                 if len(raw_ingred) < 3 and (not raw_allergens or raw_allergens == []):
-                    return f"⚠️ NO DATA FOUND: {p_name}", "warning", "Database is empty. Please check the label manually."
+                    return f"⚠️ NO DATA FOUND: {p_name}", "warning", "Database is empty."
 
                 full_text = f"{raw_ingred} {str(raw_allergens)}"
                 dangers = []
@@ -140,7 +140,6 @@ else:
             elif alert == "success": st.success(res)
             else: st.warning(res)
 
-            # Manual Save Logic - Only shows when the database truly has nothing
             if alert in ["warning", "not_found", "info"]:
                 st.markdown("### 💾 Save Your Decision")
                 m_name = st.text_input("Product Name:", value=res.split(':')[-1].strip() if ':' in res else "")
@@ -166,26 +165,57 @@ else:
         st.session_state.full_db = load_data()
         search = st.text_input("🔍 Search List", "").lower()
         items = {k: v for k, v in st.session_state.full_db.items() if search in str(v['name']).lower() or search in str(k)}
+        
         for bc, info in items.items():
             edit_key = f"is_editing_{bc}"
+            delete_key = f"is_deleting_{bc}" # Added state for deletion confirmation
+            
             if edit_key not in st.session_state: st.session_state[edit_key] = False
+            if delete_key not in st.session_state: st.session_state[delete_key] = False
+            
             with st.container(border=True):
                 if st.session_state[edit_key]:
+                    # --- EDIT UI ---
                     n_n = st.text_input("Name", info['name'], key=f"n_{bc}")
                     n_r = st.text_input("Reason", info['reason'], key=f"r_{bc}")
                     n_s = st.selectbox("Status", ["Safe", "Danger"], 0 if info['status']=="Safe" else 1, key=f"s_{bc}")
-                    if st.button("Save 💾", key=f"sv_{bc}"):
+                    if st.button("Save Changes 💾", key=f"sv_{bc}"):
                         update_entry(bc, n_n, n_r, n_s, st.session_state.current_user)
                         st.session_state[edit_key] = False
                         st.rerun()
+                
+                elif st.session_state[delete_key]:
+                    # --- PROTECTED DELETE UI ---
+                    st.warning(f"Are you sure you want to delete **{info['name']}**?")
+                    confirm_text = st.text_input(f"Type 'DELETE' to confirm:", key=f"conf_{bc}")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("Confirm Delete 🗑️", key=f"real_del_{bc}"):
+                            if confirm_text == "DELETE":
+                                delete_entry(bc)
+                            else:
+                                st.error("You must type DELETE exactly.")
+                    with col2:
+                        if st.button("Cancel", key=f"cancel_del_{bc}"):
+                            st.session_state[delete_key] = False
+                            st.rerun()
+                
                 else:
+                    # --- VIEW UI ---
                     color = "green" if info['status'] == "Safe" else "red"
                     st.markdown(f"**{info['name']}** (:{color}[{info['status']}])")
                     st.caption(f"Barcode: `{bc}` | By: {info.get('verified_by', 'System')}")
-                    if st.button("Edit ✏️", key=f"e_{bc}"):
-                        st.session_state[edit_key] = True
-                        st.rerun()
+                    
+                    b1, b2 = st.columns(2)
+                    with b1:
+                        if st.button("Edit ✏️", key=f"e_{bc}"):
+                            st.session_state[edit_key] = True
+                            st.rerun()
+                    with b2:
+                        if st.button("Delete 🗑️", key=f"d_{bc}"):
+                            st.session_state[delete_key] = True
+                            st.rerun()
 
     with tab3:
         st.header("🕒 Trip History")
-        # Same history logic as before
+        # History logic...
