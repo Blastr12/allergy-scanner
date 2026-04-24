@@ -19,21 +19,45 @@ PASS_TO_USER = {
 }
 
 # --- DATABASE ENGINE ---
-if 'full_db' not in st.session_state:
+# This ensures the list is loaded correctly every single time the page refreshes
+def load_data():
     if os.path.exists(DB_FILE):
-        df = pd.read_csv(DB_FILE, dtype={'barcode': str})
-        if 'verified_by' not in df.columns: df['verified_by'] = "System"
-        st.session_state.full_db = df.set_index('barcode').to_dict('index')
-    else: st.session_state.full_db = {}
+        try:
+            df = pd.read_csv(DB_FILE, dtype={'barcode': str})
+            if 'verified_by' not in df.columns: df['verified_by'] = "System"
+            return df.set_index('barcode').to_dict('index')
+        except:
+            return {}
+    return {}
+
+if 'full_db' not in st.session_state:
+    st.session_state.full_db = load_data()
 
 if 'scan_history' not in st.session_state:
     st.session_state.scan_history = []
 
 def save_to_permanent_memory(barcode, name, reason, status, user):
-    st.session_state.full_db[barcode] = {"name": name, "reason": reason, "status": status, "verified_by": user}
+    # 1. Update the app's current brain
+    st.session_state.full_db[barcode] = {
+        "name": name, 
+        "reason": reason, 
+        "status": status, 
+        "verified_by": user
+    }
+    # 2. Force write to the actual file
     df = pd.DataFrame.from_dict(st.session_state.full_db, orient='index').reset_index()
     df.rename(columns={'index': 'barcode'}, inplace=True)
     df.to_csv(DB_FILE, index=False)
+    # 3. Success message
+    st.toast(f"✅ Saved {name} to Family List forever!")
+
+def delete_from_memory(barcode):
+    if barcode in st.session_state.full_db:
+        del st.session_state.full_db[barcode]
+        df = pd.DataFrame.from_dict(st.session_state.full_db, orient='index').reset_index()
+        df.rename(columns={'index': 'barcode'}, inplace=True)
+        df.to_csv(DB_FILE, index=False)
+        st.rerun()
 
 # --- LOGIN ---
 st.sidebar.header("🔑 Family Access")
@@ -48,15 +72,15 @@ if current_user:
             st.session_state.frozen_barcode = None
 
         def check_allergy(barcode, user):
-            barcode = barcode.strip()
+            barcode = str(barcode).strip()
             
-            # 1. PRIORITY: Check your saved list first
+            # CHECK FAMILY LIST (The "Forever" memory)
             if barcode in st.session_state.full_db:
                 item = st.session_state.full_db[barcode]
                 emoji = "✅" if item['status'] == "Safe" else "❌"
                 return f"{emoji} {item['status'].upper()}: {item['name']}", item['status'].lower(), f"Reason: {item['reason']} (Verified by: {item.get('verified_by', 'System')})", None
 
-            # 2. WEB FETCH
+            # WEB FETCH
             url = f"https://world.openfoodfacts.org/api/v2/product/{barcode}.json"
             try:
                 response = requests.get(url, impersonate="chrome", timeout=5)
@@ -65,14 +89,12 @@ if current_user:
                 p_name = product.get("product_name", "Unknown Product").upper()
                 img = product.get("image_front_url") or product.get("image_url")
                 
-                # Extracting raw values for validation
                 raw_ingred = str(product.get("ingredients_text", "")).strip().lower()
                 raw_allergens = product.get('allergens_hierarchy', [])
                 
-                # --- THE STRICT DATA CATCH ---
-                # This stops the code if ingredients are missing or too short to be real
+                # STRICT DATA CATCH (for those [] items)
                 if len(raw_ingred) < 5 or not raw_allergens or raw_allergens == []:
-                    return f"⚠️ INCOMPLETE DATA: {p_name}", "warning", f"Missing info in database. (Ingredients found: '{raw_ingred}')", img
+                    return f"⚠️ INCOMPLETE DATA: {p_name}", "warning", "No data found. Check label and save your decision below.", img
 
                 full_text = f"{raw_ingred} {str(raw_allergens)}"
                 dangers = []
@@ -102,27 +124,57 @@ if current_user:
             res, alert, raw, official_img = check_allergy(st.session_state.frozen_barcode, current_user)
             if official_img: st.image(official_img, use_container_width=True)
             
-            # Displaying based on strict status
             if alert == "error": st.error(res)
             elif alert == "success": st.success(res)
-            else: st.warning(res) # Yellow box for Incomplete Data or Warnings
+            else: st.warning(res)
 
+            # SAVE DECISION SECTION (Triggers for empty [] data or new items)
             if alert in ["warning", "not_found", "info"]:
-                st.markdown("### 💾 Make a Permanent Decision")
-                m_name = st.text_input("Name:", value=res.split(':')[-1].strip() if ':' in res else "")
+                st.markdown("### 💾 Save Your Decision Forever")
+                m_name = st.text_input("Product Name:", value=res.split(':')[-1].strip() if ':' in res else "")
                 m_reason = st.text_input("Why is it safe/danger?")
                 c1, c2 = st.columns(2)
                 with c1:
                     if st.button("Mark SAFE Forever ✅"):
                         if m_name and m_reason:
                             save_to_permanent_memory(st.session_state.frozen_barcode, m_name, m_reason, "Safe", current_user)
+                            st.session_state.frozen_barcode = None # Reset scanner
                             st.rerun()
                 with c2:
                     if st.button("Mark DANGER Forever ❌"):
                         if m_name and m_reason:
                             save_to_permanent_memory(st.session_state.frozen_barcode, m_name, m_reason, "Danger", current_user)
+                            st.session_state.frozen_barcode = None # Reset scanner
                             st.rerun()
             
             with st.expander("Details"): st.write(raw)
 
-# [Remaining tab logic...]
+    with tab2:
+        st.header("📋 Family List Management")
+        # Reloading data here ensures the list is ALWAYS up to date
+        st.session_state.full_db = load_data()
+        
+        search = st.text_input("🔍 Search List", "").lower()
+        items = {k: v for k, v in st.session_state.full_db.items() if search in str(v['name']).lower() or search in str(k)}
+        
+        if not items:
+            st.info("No items saved yet.")
+        
+        for bc, info in items.items():
+            with st.container(border=True):
+                color = "green" if info['status'] == "Safe" else "red"
+                st.markdown(f"**{info['name']}**")
+                st.markdown(f"Status: :{color}[{info['status']}]")
+                st.caption(f"Verified by: **{info.get('verified_by', 'System')}** | BC: `{bc}`")
+                if st.button("Delete 🗑️", key=f"del_{bc}"):
+                    delete_from_memory(bc)
+
+    with tab3:
+        # Trip History stays the same
+        st.header("🕒 Trip History")
+        for item in st.session_state.scan_history:
+            icon = "✅" if item['status'] == "Safe" else "❌"
+            st.write(f"**{item['time']}** | {icon} {item['name']} | User: {item['user']}")
+
+else:
+    st.info("Enter your name to unlock.")
